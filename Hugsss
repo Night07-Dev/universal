@@ -1,0 +1,604 @@
+--[[
+	
+	Hug Script by AI Assistant (ВЕРСИЯ 1.1 - ИСПРАВЛЕНА ОШИБКА С ЦВЕТОМ)
+	
+	Features:
+	- Draggable GUI with minimize, close, and settings options.
+	- Separate draggable toggle button.
+	- Scrolling player list with avatars, usernames, and display names.
+	- Language switching (RU/EN).
+	- Smooth hugging animation and follow logic.
+	- Robust error handling (target leaving/dying).
+	
+]]
+
+-- =============================================================================
+--                           [ НАСТРОЙКИ ]
+-- =============================================================================
+
+-- ВАЖНО: Замените '0' на ID вашей анимации объятий!
+-- Пример: local HUG_ANIMATION_ID = "rbxassetid://1234567890"
+local HUG_ANIMATION_ID = "rbxassetid://0" -- <<<< ВСТАВЬТЕ ID СЮДА
+
+-- Расстояние от спины цели (можете настроить)
+local HUG_DISTANCE_OFFSET = 2.2
+
+-- =============================================================================
+--                           [ СЕРВИСЫ И ПЕРЕМЕННЫЕ ]
+-- =============================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local localPlayer = Players.LocalPlayer
+local mouse = localPlayer:GetMouse()
+
+-- Состояние
+local selectedPlayer = nil
+local isHugging = false
+local hugConnection = nil
+local hugAnimationTrack = nil
+local currentLanguage = "ru" -- 'ru' или 'en'
+
+-- =============================================================================
+--                           [ ЛОКАЛИЗАЦИЯ (ТЕКСТ) ]
+-- =============================================================================
+
+local translations = {
+	ru = {
+		title = "Меню Объятий",
+		player_list = "Список игроков",
+		hug_button = "Обнимать",
+		stop_button = "Прекратить",
+		settings_button = "Настройки",
+		settings_title = "Настройки",
+		language_label = "Язык:",
+		close_tooltip = "Закрыть навсегда",
+		minimize_tooltip = "Свернуть/Развернуть",
+		toggle_tooltip = "Открыть меню объятий"
+	},
+	en = {
+		title = "Hug Menu",
+		player_list = "Player List",
+		hug_button = "Hug",
+		stop_button = "Stop",
+		settings_button = "Settings",
+		settings_title = "Settings",
+		language_label = "Language:",
+		close_tooltip = "Close permanently",
+		minimize_tooltip = "Minimize/Expand",
+		toggle_tooltip = "Open Hug Menu"
+	}
+}
+
+-- =============================================================================
+--                           [ СОЗДАНИЕ GUI ]
+-- =============================================================================
+
+-- Главный контейнер
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HugGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Маленькая кнопка для вкл/выкл GUI
+local toggleButton = Instance.new("ImageButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Image = "rbxassetid://6031393399" -- Иконка сердечка
+toggleButton.BackgroundTransparency = 1
+toggleButton.Size = UDim2.new(0, 50, 0, 50)
+toggleButton.Position = UDim2.new(0, 20, 0.5, -25)
+toggleButton.ZIndex = 10
+toggleButton.Parent = screenGui
+
+local toggleButtonCorner = Instance.new("UICorner", toggleButton)
+toggleButtonCorner.CornerRadius = UDim.new(1, 0)
+
+-- Главное окно
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 250, 0, 350)
+mainFrame.Position = UDim2.new(0.5, -125, 0.5, -175)
+mainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+mainFrame.BorderSizePixel = 0
+mainFrame.Visible = false -- Изначально скрыто
+mainFrame.ClipsDescendants = true
+mainFrame.ZIndex = 2
+mainFrame.Parent = screenGui
+
+local mainFrameCorner = Instance.new("UICorner", mainFrame)
+mainFrameCorner.CornerRadius = UDim.new(0, 8)
+
+-- Заголовок окна (для перетаскивания)
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 30)
+titleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, -65, 1, 0)
+titleLabel.Position = UDim2.new(0, 5, 0, 0)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextColor3 = Color3.fromRGB(225, 225, 225)
+titleLabel.TextSize = 16
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.BackgroundTransparency = 1
+titleLabel.Parent = titleBar
+
+-- Кнопки управления окном
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 25, 0, 25)
+closeButton.Position = UDim2.new(1, -30, 0.5, -12.5)
+closeButton.Text = "X"
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.BorderSizePixel = 0
+closeButton.ZIndex = 3
+closeButton.Parent = titleBar
+local closeButtonCorner = Instance.new("UICorner", closeButton)
+closeButtonCorner.CornerRadius = UDim.new(0, 4)
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "MinimizeButton"
+minimizeButton.Size = UDim2.new(0, 25, 0, 25)
+minimizeButton.Position = UDim2.new(1, -60, 0.5, -12.5)
+minimizeButton.Text = "—"
+minimizeButton.Font = Enum.Font.SourceSansBold
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+minimizeButton.BorderSizePixel = 0
+minimizeButton.ZIndex = 3
+minimizeButton.Parent = titleBar
+local minimizeButtonCorner = Instance.new("UICorner", minimizeButton)
+minimizeButtonCorner.CornerRadius = UDim.new(0, 4)
+
+-- Контентная часть
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, 0, 1, -30)
+contentFrame.Position = UDim2.new(0, 0, 0, 30)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+-- Список игроков
+local playerListLabel = Instance.new("TextLabel")
+playerListLabel.Name = "PlayerListLabel"
+playerListLabel.Size = UDim2.new(1, -20, 0, 20)
+playerListLabel.Position = UDim2.new(0, 10, 0, 10)
+playerListLabel.Font = Enum.Font.SourceSans
+playerListLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+playerListLabel.TextSize = 14
+playerListLabel.TextXAlignment = Enum.TextXAlignment.Left
+playerListLabel.BackgroundTransparency = 1
+playerListLabel.Parent = contentFrame
+
+local playerListFrame = Instance.new("ScrollingFrame")
+playerListFrame.Name = "PlayerList"
+playerListFrame.Size = UDim2.new(1, -20, 0, 180)
+playerListFrame.Position = UDim2.new(0, 10, 0, 35)
+playerListFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+playerListFrame.BorderSizePixel = 1
+playerListFrame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+playerListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+playerListFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
+playerListFrame.ScrollBarThickness = 6
+playerListFrame.Parent = contentFrame
+
+local playerListLayout = Instance.new("UIListLayout")
+playerListLayout.Padding = UDim.new(0, 5)
+playerListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+playerListLayout.Parent = playerListFrame
+
+-- Шаблон для игрока в списке
+local playerTemplate = Instance.new("Frame")
+playerTemplate.Name = "PlayerTemplate"
+playerTemplate.Size = UDim2.new(1, 0, 0, 50)
+playerTemplate.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+playerTemplate.BorderSizePixel = 0
+local ptCorner = Instance.new("UICorner", playerTemplate)
+ptCorner.CornerRadius = UDim.new(0, 4)
+local ptPadding = Instance.new("UIPadding", playerTemplate)
+ptPadding.PaddingLeft = UDim.new(0, 5)
+ptPadding.PaddingRight = UDim.new(0, 5)
+ptPadding.PaddingTop = UDim.new(0, 5)
+ptPadding.PaddingBottom = UDim.new(0, 5)
+
+local ptAvatar = Instance.new("ImageLabel")
+ptAvatar.Name = "Avatar"
+ptAvatar.Size = UDim2.new(0, 40, 0, 40)
+ptAvatar.BackgroundTransparency = 1
+ptAvatar.Parent = playerTemplate
+local ptAvatarCorner = Instance.new("UICorner", ptAvatar)
+ptAvatarCorner.CornerRadius = UDim.new(1, 0)
+
+local ptNameLabel = Instance.new("TextLabel")
+ptNameLabel.Name = "NameLabel"
+ptNameLabel.Size = UDim2.new(1, -50, 1, 0)
+ptNameLabel.Position = UDim2.new(0, 50, 0, 0)
+ptNameLabel.Font = Enum.Font.SourceSans
+ptNameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+ptNameLabel.TextSize = 14
+ptNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+ptNameLabel.TextYAlignment = Enum.TextYAlignment.Center
+ptNameLabel.BackgroundTransparency = 1
+ptNameLabel.Parent = playerTemplate
+
+local ptSelectionButton = Instance.new("TextButton")
+ptSelectionButton.Name = "SelectionButton"
+ptSelectionButton.Size = UDim2.new(1, 0, 1, 0)
+ptSelectionButton.BackgroundTransparency = 1
+ptSelectionButton.Text = ""
+ptSelectionButton.Parent = playerTemplate
+
+-- Кнопки управления
+local hugButton = Instance.new("TextButton")
+hugButton.Name = "HugButton"
+hugButton.Size = UDim2.new(0.5, -15, 0, 35)
+hugButton.Position = UDim2.new(0, 10, 1, -85)
+hugButton.BackgroundColor3 = Color3.fromRGB(75, 180, 75)
+hugButton.Font = Enum.Font.SourceSansBold
+hugButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+hugButton.TextSize = 16
+hugButton.Parent = contentFrame
+local hbCorner = Instance.new("UICorner", hugButton)
+hbCorner.CornerRadius = UDim.new(0, 6)
+
+local stopButton = Instance.new("TextButton")
+stopButton.Name = "StopButton"
+stopButton.Size = UDim2.new(0.5, -15, 0, 35)
+stopButton.Position = UDim2.new(0.5, 5, 1, -85)
+stopButton.BackgroundColor3 = Color3.fromRGB(200, 75, 75)
+stopButton.Font = Enum.Font.SourceSansBold
+stopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+stopButton.TextSize = 16
+stopButton.Parent = contentFrame
+local sbCorner = Instance.new("UICorner", stopButton)
+sbCorner.CornerRadius = UDim.new(0, 6)
+
+local settingsButton = Instance.new("TextButton")
+settingsButton.Name = "SettingsButton"
+settingsButton.Size = UDim2.new(1, -20, 0, 35)
+settingsButton.Position = UDim2.new(0, 10, 1, -45)
+settingsButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+settingsButton.Font = Enum.Font.SourceSansBold
+settingsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+settingsButton.TextSize = 16
+settingsButton.Parent = contentFrame
+local setbCorner = Instance.new("UICorner", settingsButton)
+setbCorner.CornerRadius = UDim.new(0, 6)
+
+-- Окно настроек
+local settingsFrame = Instance.new("Frame")
+settingsFrame.Name = "SettingsFrame"
+settingsFrame.Size = UDim2.new(1, 0, 1, -30)
+settingsFrame.Position = UDim2.new(0, 0, 0, 30)
+settingsFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+settingsFrame.BorderSizePixel = 0
+settingsFrame.Visible = false
+settingsFrame.Parent = mainFrame
+
+local settingsTitle = Instance.new("TextLabel")
+settingsTitle.Size = UDim2.new(1, -20, 0, 30)
+settingsTitle.Position = UDim2.new(0, 10, 0, 10)
+settingsTitle.Font = Enum.Font.SourceSansBold
+settingsTitle.TextSize = 18
+settingsTitle.TextColor3 = Color3.fromRGB(225, 225, 225)
+settingsTitle.BackgroundTransparency = 1
+settingsTitle.Parent = settingsFrame
+
+local langLabel = Instance.new("TextLabel")
+langLabel.Position = UDim2.new(0, 10, 0, 50)
+langLabel.Size = UDim2.new(0, 100, 0, 30)
+langLabel.Font = Enum.Font.SourceSans
+langLabel.TextSize = 16
+langLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+langLabel.BackgroundTransparency = 1
+langLabel.TextXAlignment = Enum.TextXAlignment.Left
+langLabel.Parent = settingsFrame
+
+local ruButton = Instance.new("TextButton")
+ruButton.Size = UDim2.new(0, 50, 0, 30)
+ruButton.Position = UDim2.new(0, 110, 0, 50)
+ruButton.Text = "RU"
+ruButton.Font = Enum.Font.SourceSansBold
+ruButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+ruButton.TextColor3 = Color3.fromRGB(255, 255, 255) -- ИСПРАВЛЕНО
+ruButton.Parent = settingsFrame
+local ruCorner = Instance.new("UICorner", ruButton)
+ruCorner.CornerRadius = UDim.new(0, 4)
+
+local enButton = Instance.new("TextButton")
+enButton.Size = UDim2.new(0, 50, 0, 30)
+enButton.Position = UDim2.new(0, 170, 0, 50)
+enButton.Text = "EN"
+enButton.Font = Enum.Font.SourceSansBold
+enButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+enButton.TextColor3 = Color3.fromRGB(255, 255, 255) -- ИСПРАВЛЕНО
+enButton.Parent = settingsFrame
+local enCorner = Instance.new("UICorner", enButton)
+enCorner.CornerRadius = UDim.new(0, 4)
+
+-- =============================================================================
+--                           [ ФУНКЦИИ GUI ]
+-- =============================================================================
+
+-- Функция для перетаскивания элемента
+local function makeDraggable(element, handle)
+	local dragging = false
+	local dragInput = nil
+	local dragStart = nil
+	local startPos = nil
+
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = element.Position
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	handle.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			if dragging then
+				local delta = input.Position - dragStart
+				element.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			end
+		end
+	end)
+end
+
+-- Обновление текстов в GUI в соответствии с языком
+local function updateLanguage()
+	local t = translations[currentLanguage]
+	titleLabel.Text = t.title
+	playerListLabel.Text = t.player_list
+	hugButton.Text = t.hug_button
+	stopButton.Text = t.stop_button
+	settingsButton.Text = t.settings_button
+	settingsTitle.Text = t.settings_title
+	langLabel.Text = t.language_label
+
+	-- Подсветка активного языка
+	ruButton.BackgroundColor3 = (currentLanguage == "ru") and Color3.fromRGB(100, 160, 220) or Color3.fromRGB(80, 80, 80)
+	enButton.BackgroundColor3 = (currentLanguage == "en") and Color3.fromRGB(100, 160, 220) or Color3.fromRGB(80, 80, 80)
+end
+
+-- Обновление списка игроков
+local function updatePlayerList()
+	-- Очистка старого списка
+	local currentlySelectedFrame = nil
+	for _, v in ipairs(playerListFrame:GetChildren()) do
+		if v:IsA("Frame") then
+			-- Сохраняем ссылку на выделенный фрейм, чтобы не потерять его при обновлении
+			if v.Name == "PlayerFrame" and v.PlayerInstance == selectedPlayer then
+				currentlySelectedFrame = v
+			end
+			v:Destroy()
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player == localPlayer then continue end
+
+		local playerFrame = playerTemplate:Clone()
+		playerFrame.Name = "PlayerFrame" -- Даем имя для идентификации
+		playerFrame.PlayerInstance = player -- Сохраняем ссылку на игрока
+		playerFrame.Parent = playerListFrame
+
+		local nameLabel = playerFrame.NameLabel
+		nameLabel.Text = string.format("%s\n(@%s)", player.DisplayName, player.Name)
+
+		local avatar = playerFrame.Avatar
+		local success, content = pcall(function()
+			return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
+		end)
+		if success and content then
+			avatar.Image = content
+		end
+
+		-- Если этот игрок был выбран до обновления, выделяем его снова
+		if player == selectedPlayer then
+			playerFrame.BackgroundColor3 = Color3.fromRGB(80, 130, 180)
+			currentlySelectedFrame = playerFrame -- Обновляем ссылку на новый фрейм
+		end
+
+		playerFrame.SelectionButton.MouseButton1Click:Connect(function()
+			if currentlySelectedFrame then
+				-- Снимаем выделение со старого
+				TweenService:Create(currentlySelectedFrame, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(55, 55, 55)}):Play()
+			end
+			-- Выделяем новый
+			TweenService:Create(playerFrame, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(80, 130, 180)}):Play()
+			currentlySelectedFrame = playerFrame
+			selectedPlayer = player
+		end)
+	end
+end
+
+-- =============================================================================
+--                           [ ОСНОВНАЯ ЛОГИКА (ОБЪЯТИЯ) ]
+-- =============================================================================
+
+function stopHugging()
+	if not isHugging then return end
+
+	isHugging = false
+	if hugConnection then
+		hugConnection:Disconnect()
+		hugConnection = nil
+	end
+
+	if hugAnimationTrack then
+		hugAnimationTrack:Stop(0.2)
+		hugAnimationTrack:Destroy() -- Уничтожаем трек после использования
+		hugAnimationTrack = nil
+	end
+
+	local character = localPlayer.Character
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.PlatformStand = false
+		end
+	end
+	print("Hugging stopped.")
+end
+
+function startHugging(targetPlayer)
+	if isHugging then stopHugging() end
+
+	if not targetPlayer or not targetPlayer.Parent then
+		warn("Target player not found or has left.")
+		selectedPlayer = nil
+		updatePlayerList()
+		return
+	end
+
+	local character = localPlayer.Character
+	local targetCharacter = targetPlayer.Character
+
+	if not (character and targetCharacter) then
+		warn("Cannot start hugging: character not found.")
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	local targetRootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
+
+	if not (humanoid and targetHumanoid and rootPart and targetRootPart) then
+		warn("Cannot start hugging: humanoid or rootpart missing.")
+		return
+	end
+
+	if humanoid.Health <= 0 or targetHumanoid.Health <= 0 then
+		warn("Cannot hug a dead player.")
+		return
+	end
+
+	-- Загрузка анимации
+	if HUG_ANIMATION_ID ~= "rbxassetid://0" then
+		local anim = Instance.new("Animation")
+		anim.AnimationId = HUG_ANIMATION_ID
+		hugAnimationTrack = humanoid:LoadAnimation(anim)
+		anim:Destroy() -- Анимация больше не нужна после загрузки в трек
+		hugAnimationTrack.Looped = true
+		hugAnimationTrack:Play(0.2)
+	else
+		warn("Hug animation ID is not set. The player will just follow.")
+	end
+
+	isHugging = true
+	humanoid.PlatformStand = true -- "Замораживаем" игрока, чтобы скрипт мог им управлять
+
+	hugConnection = RunService.RenderStepped:Connect(function()
+		if not isHugging or not targetPlayer.Parent or not targetCharacter.Parent or targetHumanoid.Health <= 0 or humanoid.Health <= 0 then
+			stopHugging()
+			return
+		end
+
+		-- Обновляем позицию и поворот за целью
+		local targetCFrame = targetRootPart.CFrame
+		local behindPosition = targetCFrame * CFrame.new(0, 0, HUG_DISTANCE_OFFSET)
+
+		-- Плавное перемещение
+		local newCFrame = CFrame.new(behindPosition.Position, targetCFrame.Position)
+		rootPart.CFrame = rootPart.CFrame:Lerp(newCFrame, 0.2)
+	end)
+
+	-- Если цель или игрок умирают, прекращаем обнимать
+	targetHumanoid.Died:Once(stopHugging)
+	humanoid.Died:Once(stopHugging)
+end
+
+
+-- =============================================================================
+--                           [ ПОДКЛЮЧЕНИЕ СОБЫТИЙ ]
+-- =============================================================================
+
+-- Перетаскивание
+makeDraggable(mainFrame, titleBar)
+makeDraggable(toggleButton, toggleButton)
+
+-- Кнопки окна
+toggleButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = not mainFrame.Visible
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+	screenGui:Destroy()
+	stopHugging() -- На всякий случай
+end)
+
+minimizeButton.MouseButton1Click:Connect(function()
+	contentFrame.Visible = not contentFrame.Visible
+	settingsFrame.Visible = false -- Всегда скрывать настройки при сворачивании
+
+	local targetSize = contentFrame.Visible and UDim2.new(0, 250, 0, 350) or UDim2.new(0, 250, 0, 30)
+	mainFrame:TweenSize(targetSize, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+end)
+
+-- Кнопки управления
+hugButton.MouseButton1Click:Connect(function()
+	if selectedPlayer then
+		startHugging(selectedPlayer)
+	else
+		-- Можно добавить уведомление, что игрок не выбран
+		warn("No player selected!")
+	end
+end)
+
+stopButton.MouseButton1Click:Connect(stopHugging)
+
+settingsButton.MouseButton1Click:Connect(function()
+	contentFrame.Visible = not settingsFrame.Visible
+	settingsFrame.Visible = not contentFrame.Visible
+end)
+
+-- Кнопки смены языка
+ruButton.MouseButton1Click:Connect(function()
+	currentLanguage = "ru"
+	updateLanguage()
+end)
+
+enButton.MouseButton1Click:Connect(function()
+	currentLanguage = "en"
+	updateLanguage()
+end)
+
+-- Обновление списка при входе/выходе игроков
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(function(player)
+	if player == selectedPlayer then
+		selectedPlayer = nil
+		stopHugging()
+	end
+	-- Небольшая задержка, чтобы сервер успел обработать выход
+	task.wait(0.1)
+	updatePlayerList()
+end)
+
+-- =============================================================================
+--                           [ ИНИЦИАЛИЗАЦИЯ ]
+-- =============================================================================
+pcall(function()
+	updateLanguage()
+	updatePlayerList()
+	screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+end)
+
+print("HugScript loaded successfully!")
