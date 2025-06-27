@@ -1,13 +1,13 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.1 (Исправлена проблема с приоритетом анимации)
+	Версия: 1.2 (Исправлена анимация на настоящую цикличную)
 	
 	Особенности:
 	- Перетаскиваемый GUI и кнопка-переключатель
 	- Возможность свернуть и закрыть GUI
 	- Список игроков с аватарками, который обновляется в реальном времени
-	- Плавная анимация объятий
+	- Плавная, зацикленная анимация объятий
 	- Оптимизация для ПК и мобильных устройств
 ]]
 
@@ -27,9 +27,9 @@ local currentTarget = nil
 local hugLoopConnection = nil
 local hugAnimTrack = nil
 
--- ID анимации (можно заменить на свою)
--- Эта анимация - стандартная анимация поднятия предмета, она хорошо подходит для объятий.
-local HUG_ANIMATION_ID = "rbxassetid://127291773765120" 
+-- ID анимации
+-- ИЗМЕНЕНИЕ: Используем анимацию, которая предназначена для зацикливания.
+local HUG_ANIMATION_ID = "rbxassetid://180435571" 
 
 --// ФУНКЦИИ GUI //--
 
@@ -241,8 +241,7 @@ screenGui.Parent = PlayerGui
 local function updateButtons()
 	hugButton.Visible = not isHugging
 	stopButton.Visible = isHugging
-
-	-- Блокируем кнопку "Обнять", если цель не выбрана
+	
 	hugButton.Selectable = (currentTarget ~= nil)
 	if currentTarget then
 		hugButton.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
@@ -256,20 +255,20 @@ end
 -- Функция для прекращения объятий
 local function stopHugging()
 	if not isHugging then return end
-
+	
 	isHugging = false
-
+	
 	if hugLoopConnection then
 		hugLoopConnection:Disconnect()
 		hugLoopConnection = nil
 	end
-
+	
 	if hugAnimTrack then
 		hugAnimTrack:Stop()
-		hugAnimTrack:Destroy() -- ИЗМЕНЕНИЕ: Лучше уничтожать трек после использования
+		hugAnimTrack:Destroy() 
 		hugAnimTrack = nil
 	end
-
+	
 	updateButtons()
 end
 
@@ -278,87 +277,76 @@ local function startHugging()
 	if isHugging or not currentTarget or not currentTarget.Parent then
 		return
 	end
-
+	
 	local targetCharacter = currentTarget.Character
 	local localCharacter = LocalPlayer.Character
-
-	-- ИЗМЕНЕНИЕ: Добавлена проверка на Animator
+	
 	if not targetCharacter or not localCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") or not localCharacter:FindFirstChild("Humanoid") or not localCharacter.Humanoid:FindFirstChild("Animator") then
 		stopHugging()
-		currentTarget = nil -- Сбрасываем цель, если она невалидна
+		currentTarget = nil 
 		updateButtons()
 		return
 	end
-
+	
 	isHugging = true
 	updateButtons()
-
+	
 	local targetHRP = targetCharacter.HumanoidRootPart
 	local localHRP = localCharacter.HumanoidRootPart
 	local localHumanoid = localCharacter.Humanoid
-
-	-- ИЗМЕНЕНИЕ: Используем Animator и устанавливаем приоритет
 	local animator = localHumanoid:WaitForChild("Animator")
-
-	-- Загружаем и проигрываем анимацию
+	
 	local hugAnimation = Instance.new("Animation")
 	hugAnimation.AnimationId = HUG_ANIMATION_ID
-
+	
 	hugAnimTrack = animator:LoadAnimation(hugAnimation)
-	hugAnimTrack.Priority = Enum.AnimationPriority.Action -- <--- САМОЕ ВАЖНОЕ ИЗМЕНЕНИЕ
-	hugAnimTrack.Looped = true
+	hugAnimTrack.Priority = Enum.AnimationPriority.Action 
+	hugAnimTrack.Looped = true -- Убеждаемся, что анимация зациклена
 	hugAnimTrack:Play()
-
-	-- Основной цикл объятий
+	
 	hugLoopConnection = RunService.RenderStepped:Connect(function()
 		if not isHugging or not currentTarget or not currentTarget.Parent or not targetCharacter or not targetCharacter.Parent or targetCharacter.Humanoid.Health <= 0 then
 			stopHugging()
 			return
 		end
-
-		-- Вычисляем позицию сзади цели
-		local offset = CFrame.new(0, 0, -1.8) -- Расстояние от цели
+		
+		local offset = CFrame.new(0, 0, -1.8)
 		local targetCFrame = targetHRP.CFrame * offset
-
-		-- Плавно поворачиваемся к цели и двигаемся
+		
 		local newCFrame = CFrame.new(targetCFrame.Position, targetHRP.Position)
-		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2) -- Lerp для плавности
+		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2)
 	end)
 end
 
 -- Функция для обновления списка игроков
 local function updatePlayerList()
 	local selectedPlayerName = currentTarget and currentTarget.Name
-
+	
 	for _, v in ipairs(playerList:GetChildren()) do
 		if v:IsA("TextButton") then
 			v:Destroy()
 		end
 	end
-
+	
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
 			local templateClone = playerTemplate:Clone()
-
-			-- Получаем аватарку
+			
 			local success, content = pcall(function()
 				return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
 			end)
 			if success and content then
 				templateClone.Avatar.Image = content
 			end
-
-			-- Устанавливаем имя
+			
 			templateClone.PlayerName.Text = string.format("%s\n<font color='#AAAAAA'>@%s</font>", player.DisplayName, player.Name)
 			templateClone.PlayerName.RichText = true
-
+			
 			templateClone.Name = player.Name
 			templateClone.Parent = playerList
-
-			-- Обработка выбора игрока
+			
 			templateClone.MouseButton1Click:Connect(function()
 				currentTarget = player
-				-- Подсветка выбранного игрока
 				for _, btn in ipairs(playerList:GetChildren()) do
 					if btn:IsA("TextButton") then
 						btn.BackgroundColor3 = (btn.Name == player.Name) and Color3.fromRGB(88, 101, 242) or Color3.fromRGB(55, 58, 64)
@@ -366,8 +354,7 @@ local function updatePlayerList()
 				end
 				updateButtons()
 			end)
-
-			-- Восстанавливаем подсветку, если игрок был выбран ранее
+			
 			if player.Name == selectedPlayerName then
 				templateClone.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
 			end
@@ -378,19 +365,16 @@ end
 
 --// ПОДКЛЮЧЕНИЕ СОБЫТИЙ //--
 
--- Перетаскивание
 makeDraggable(mainFrame, titleBar)
 makeDraggable(toggleButton, toggleButton)
 
--- Открытие/закрытие главного окна
 toggleButton.MouseButton1Click:Connect(function()
 	mainFrame.Visible = not mainFrame.Visible
 	if mainFrame.Visible then
-		updatePlayerList() -- Обновляем список при открытии
+		updatePlayerList()
 	end
 end)
 
--- Закрытие навсегда
 closeButton.MouseButton1Click:Connect(function()
 	screenGui:Destroy()
 	if hugLoopConnection then
@@ -398,13 +382,12 @@ closeButton.MouseButton1Click:Connect(function()
 	end
 end)
 
--- Сворачивание/разворачивание
 local isMinimized = false
 local originalSize = mainFrame.Size
 minimizeButton.MouseButton1Click:Connect(function()
 	isMinimized = not isMinimized
 	local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
+	
 	if isMinimized then
 		local tween = TweenService:Create(mainFrame, tweenInfo, {Size = UDim2.new(originalSize.X.Scale, originalSize.X.Offset, 0, titleBar.AbsoluteSize.Y)})
 		tween:Play()
@@ -414,11 +397,9 @@ minimizeButton.MouseButton1Click:Connect(function()
 	end
 end)
 
--- Кнопки действий
 hugButton.MouseButton1Click:Connect(startHugging)
 stopButton.MouseButton1Click:Connect(stopHugging)
 
--- Автоматическое прекращение объятий при смерти
 LocalPlayer.CharacterAdded:Connect(function(char)
 	stopHugging()
 	char:WaitForChild("Humanoid").Died:Connect(stopHugging)
@@ -427,7 +408,6 @@ if LocalPlayer.Character then
 	LocalPlayer.Character:WaitForChild("Humanoid").Died:Connect(stopHugging)
 end
 
--- Отслеживание входа/выхода игроков для обновления списка
 Players.PlayerAdded:Connect(function()
 	if mainFrame.Visible then
 		updatePlayerList()
@@ -443,8 +423,7 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 end)
 
--- Первоначальная инициализация
 updatePlayerList()
 updateButtons()
 
-print("Hug Script v1.1 by Advanced AI Loaded!")
+print("Hug Script v1.2 by Advanced AI Loaded!")
