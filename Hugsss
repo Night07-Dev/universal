@@ -33,7 +33,7 @@ local HUG_ANIMATION_ID = "rbxassetid://70577781390587"
 -- Это более производительно и соответствует запросу.
 local hugAnimation = Instance.new("Animation")
 hugAnimation.Name = "HugAnimationObject"
-hugAnimation.AnimationId = 70577781390587
+hugAnimation.AnimationId = "rbxassetid://70577781390587"
 hugAnimation.Parent = script -- Привязываем его к самому скрипту для порядка
 
 --// ФУНКЦИИ GUI //--
