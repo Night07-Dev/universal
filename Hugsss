@@ -29,7 +29,7 @@ local hugAnimTrack = nil
 
 -- ID анимации (можно заменить на свою)
 -- Эта анимация - стандартная анимация поднятия предмета, она хорошо подходит для объятий.
-local HUG_ANIMATION_ID = "rbxassetid://507767714" 
+local HUG_ANIMATION_ID = "rbxassetid://128881018410073" 
 
 --// ФУНКЦИИ GUI //--
 
