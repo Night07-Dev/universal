@@ -1,12 +1,12 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.4 (Исправлена критическая ошибка с загрузкой списка игроков)
+	Версия: 1.5 (Исправлена проблема с неработающей прокруткой списка)
 	
 	Особенности:
 	- Перетаскиваемый GUI и кнопка-переключатель
 	- Возможность свернуть и закрыть GUI
-	- Список игроков с аватарками, который обновляется в реальном времени
+	- Работающий список игроков с прокруткой, аватарками, который обновляется в реальном времени
 	- Плавное управление руками для создания позы объятий без использования Animation
 	- Оптимизация для ПК и мобильных устройств
 ]]
@@ -304,8 +304,6 @@ end
 local function updatePlayerList()
 	local selectedPlayerName = currentTarget and currentTarget.Name
 	
-	-- ИСПРАВЛЕНИЕ: Возвращен старый, надежный метод очистки.
-	-- Удаляем только кнопки игроков, оставляя важные элементы UI (UIListLayout, UIPadding).
 	for _, child in ipairs(playerList:GetChildren()) do
 		if child:IsA("TextButton") then
 			child:Destroy()
@@ -343,6 +341,10 @@ local function updatePlayerList()
 			end
 		end
 	end
+	
+	-- ИСПРАВЛЕНИЕ: Обновляем CanvasSize, чтобы скроллинг работал.
+	-- Это необходимо делать ПОСЛЕ добавления всех элементов в список.
+	playerList.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
 end
 
 --// ПОДКЛЮЧЕНИЕ СОБЫТИЙ (код без изменений) //--
@@ -401,4 +403,4 @@ end)
 updatePlayerList()
 updateButtons()
 
-print("Hug Script v1.4 by Advanced AI Loaded!")
+print("Hug Script v1.5 by Advanced AI Loaded!")
