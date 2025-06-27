@@ -27,12 +27,12 @@ local hugLoopConnection = nil
 local hugAnimTrack = nil
 
 -- ИЗМЕНЕНИЕ: ID R15-совместимой анимации, написанный с использованием только латинских символов.
-local HUG_ANIMATION_ID = "rbxassetid://524319739"
+local HUG_ANIMATION_ID = "rbxassetid://70577781390587"
 
 -- Создаем объект Animation один раз при запуске скрипта.
 local hugAnimation = Instance.new("Animation")
 hugAnimation.Name = "HugAnimationObject"
-hugAnimation.AnimationId = HUG_ANIMATION_ID
+hugAnimation.AnimationId = 70577781390587
 hugAnimation.Parent = script
 
 --// ФУНКЦИИ GUI //--
