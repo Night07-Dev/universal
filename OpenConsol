@@ -1,22 +1,24 @@
 --[[
+	ФИНАЛЬНАЯ ВЕРСИЯ
 	Локальный скрипт для создания перетаскиваемой кнопки,
 	которая открывает и закрывает консоль разработчика Roblox.
 	
-	ИСПРАВЛЕННАЯ ВЕРСИЯ: Корректно работает на мобильных устройствах,
-	отслеживая окончание перетаскивания глобально.
+	Исправлена проблема с перетаскиванием на мобильных устройствах
+	путем переключения на абсолютную пиксельную систему позиционирования во время перетаскивания.
 ]]
 
--- Получаем необходимые сервисы
+-- Сервисы
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
--- Переменные для отслеживания состояния
-local isDragging = false      -- Перетаскивается ли кнопка в данный момент
-local consoleVisible = false  -- Видна ли консоль в данный момент
-local dragStartPos = nil      -- Начальная позиция курсора/пальца при перетаскивании
-local buttonStartPos = nil    -- Начальная позиция кнопки при перетаскивании
-local dragThreshold = 10      -- Увеличим порог для сенсорных экранов, чтобы избежать случайных кликов
+-- Переменные состояния
+local isDragging = false
+local consoleVisible = false
+local dragStartPos = nil
+local buttonStartPixelPos = nil -- Будем хранить абсолютную позицию кнопки в пикселях
+local dragThreshold = 10
 
 -- Создание GUI
 local player = Players.LocalPlayer
@@ -25,7 +27,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ConsoleToggleGui"
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.ResetOnSpawn = false -- Позиция кнопки будет сохраняться после смерти персонажа
+screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
 -- Создание кнопки
@@ -38,12 +40,12 @@ toggleButton.TextSize = 24
 toggleButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 toggleButton.BorderColor3 = Color3.fromRGB(30, 30, 30)
 toggleButton.BorderSizePixel = 2
-toggleButton.AutoButtonColor = false -- Отключаем автоматическое изменение цвета при наведении/нажатии
+toggleButton.AutoButtonColor = false
 
--- Размер и начальная позиция кнопки
-toggleButton.Size = UDim2.fromOffset(45, 45) -- Немного увеличим для удобства на мобильных
-toggleButton.Position = UDim2.new(1, -55, 1, -55) -- 55 пикселей от правого и нижнего края
-toggleButton.AnchorPoint = Vector2.new(1, 1)
+-- Размер и НАЧАЛЬНАЯ позиция/якорь
+toggleButton.Size = UDim2.fromOffset(45, 45)
+toggleButton.Position = UDim2.new(1, -55, 1, -55) -- 55px от правого-нижнего края
+toggleButton.AnchorPoint = Vector2.new(1, 1) -- Якорь в правом-нижнем углу
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
@@ -51,35 +53,40 @@ corner.Parent = toggleButton
 
 toggleButton.Parent = screenGui
 
--- --- Логика работы ---
+-- --- Логика ---
 
--- Функция для переключения видимости консоли
 local function toggleConsole()
 	consoleVisible = not consoleVisible
 	StarterGui:SetCore("DevConsoleVisible", consoleVisible)
 end
 
--- Событие, когда пользователь НАЖИМАЕТ на кнопку (это наш стартовый триггер)
+-- Когда пользователь нажимает на кнопку
 toggleButton.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		isDragging = true
 		dragStartPos = input.Position
-		buttonStartPos = toggleButton.Position
-		-- Слегка изменим вид кнопки при нажатии
+		
+		-- ==== КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ====
+		-- 1. Запоминаем текущую абсолютную позицию кнопки в пикселях.
+		buttonStartPixelPos = toggleButton.AbsolutePosition
+		
+		-- 2. Немедленно переключаем позиционирование кнопки на чистый Offset от верхнего левого угла.
+		-- Это решает все проблемы с конфликтами Scale и Offset при перетаскивании.
+		toggleButton.AnchorPoint = Vector2.new(0, 0)
+		toggleButton.Position = UDim2.fromOffset(buttonStartPixelPos.X, buttonStartPixelPos.Y)
+		
+		-- Визуальный отклик
 		toggleButton.BackgroundColor3 = Color3.fromRGB(110, 110, 110)
 	end
 end)
 
--- Событие, которое отслеживает ОТПУСКАНИЕ кнопки мыши или пальца В ЛЮБОМ МЕСТЕ ЭКРАНА
--- Это ключевое исправление для мобильных устройств
+-- Когда пользователь отпускает палец/кнопку мыши в любом месте экрана
 UserInputService.InputEnded:Connect(function(input)
-	-- Проверяем, был ли активен режим перетаскивания
 	if isDragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 		isDragging = false
-		-- Возвращаем кнопке обычный цвет
 		toggleButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 		
-		-- Проверяем, было ли это перетаскивание или просто клик
+		-- Проверяем, был ли это клик или перетаскивание
 		local dragDistance = (input.Position - dragStartPos).Magnitude
 		if dragDistance < dragThreshold then
 			toggleConsole()
@@ -87,27 +94,23 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- Событие, которое отслеживает ДВИЖЕНИЕ мыши или пальца по экрану
+-- Когда пользователь двигает пальцем/мышью
 UserInputService.InputChanged:Connect(function(input)
-	-- Проверяем, что мы в режиме перетаскивания и что тип ввода - это движение
 	if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		-- Рассчитываем смещение от начальной точки
 		local delta = input.Position - dragStartPos
 		
-		-- Рассчитываем новую позицию кнопки
-		-- Используем UDim2.fromOffset для простоты, т.к. мы не используем Scale
-		local newPosition = UDim2.fromOffset(
-			buttonStartPos.X.Offset + delta.X,
-			buttonStartPos.Y.Offset + delta.Y
-		)
+		-- Новая позиция = начальная пиксельная позиция + смещение
+		local newPixelPos = buttonStartPixelPos + delta
 		
-		-- Ограничиваем позицию кнопки, чтобы она не выходила за пределы экрана
+		-- Ограничиваем движение в пределах экрана
 		local screenBounds = screenGui.AbsoluteSize
 		local buttonSize = toggleButton.AbsoluteSize
 		
-		-- Используем math.clamp для ограничения
-		local newX = math.clamp(newPosition.X.Offset, 0, screenBounds.X - buttonSize.X)
-		local newY = math.clamp(newPosition.Y.Offset, 0, screenBounds.Y - buttonSize.Y)
+		local clampedX = math.clamp(newPixelPos.X, 0, screenBounds.X - buttonSize.X)
+		local clampedY = math.clamp(newPixelPos.Y, 0, screenBounds.Y - buttonSize.Y)
 		
-		toggleButton.Position = UDim2.fromOffset(newX, newY)
+		-- Устанавливаем новую позицию в пикселях (т.к. мы уже переключились на AnchorPoint 0,0)
+		toggleButton.Position = UDim2.fromOffset(clampedX, clampedY)
 	end
 end)
