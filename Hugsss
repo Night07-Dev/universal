@@ -1,14 +1,14 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.7 (РЕАЛИЗОВАНА ВИДИМОСТЬ ДЛЯ ВСЕХ ИГРОКОВ ЧЕРЕЗ РЕПЛИКАЦИЮ АНИМАЦИИ)
+	Версия: 1.8 (РЕАЛИЗОВАН ОТКАЗОУСТОЙЧИВЫЙ МЕХАНИЗМ АНИМАЦИИ)
 	
 	Особенности:
-	- Объятия видны всем игрокам на сервере, оставаясь при этом локальным скриптом.
-	- Перетаскиваемый GUI и кнопка-переключатель.
-	- Работающий список игроков с прокруткой и аватарками.
-	- Используется стабильная, зацикленная анимация для позы объятий.
-	- Оптимизация для ПК и мобильных устройств.
+	- Объятия видны всем игрокам на сервере.
+	- Использована R15-совместимая анимация.
+	- Реализован принудительный цикл анимации для 100% стабильности позы.
+	- Добавлена защищённая загрузка анимации для предотвращения ошибок.
+	- Все предыдущие исправления (GUI, прокрутка, список) сохранены.
 ]]
 
 --// СЕРВИСЫ //--
@@ -25,11 +25,10 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local isHugging = false
 local currentTarget = nil
 local hugLoopConnection = nil
-local hugAnimTrack = nil -- Возвращаем переменную для анимации
+local hugAnimTrack = nil
 
--- ID АНИМАЦИИ, КОТОРАЯ БУДЕТ ВИДНА ВСЕМ
--- Используем стандартную анимацию удержания предмета. Она отлично подходит для объятий и всегда работает.
-local HUG_ANIMATION_ID = "rbxassetid://99536264902503"
+-- ИЗМЕНЕНИЕ: ID R15-совместимой анимации. "Zombie" имеет подходящую позу с вытянутыми руками.
+local HUG_ANIMATION_ID = "rbxassetid://524319739"
 
 --// ФУНКЦИИ GUI //--
 
@@ -232,7 +231,6 @@ local function stopHugging()
 		hugLoopConnection = nil
 	end
 	
-	-- Останавливаем и уничтожаем анимацию
 	if hugAnimTrack then
 		hugAnimTrack:Stop()
 		hugAnimTrack:Destroy()
@@ -246,11 +244,13 @@ end
 local function startHugging()
 	if isHugging or not currentTarget or not currentTarget.Parent then return end
 	
-	local targetCharacter = currentTarget.Character
-	local localCharacter = LocalPlayer.Character
+	-- Максимально надёжное получение всех компонентов
+	local localCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local humanoid = localCharacter:WaitForChild("Humanoid")
+	local animator = humanoid:WaitForChild("Animator")
 	
-	-- Проверяем наличие Animator, он нужен для проигрывания анимаций
-	if not targetCharacter or not localCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") or not localCharacter.Humanoid:FindFirstChild("Animator") then
+	local targetCharacter = currentTarget.Character
+	if not targetCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") then
 		stopHugging()
 		currentTarget = nil 
 		updateButtons()
@@ -260,20 +260,27 @@ local function startHugging()
 	isHugging = true
 	updateButtons()
 	
-	-- ИЗМЕНЕНИЕ: Запускаем анимацию, которая будет реплицироваться
-	local animator = localCharacter.Humanoid.Animator
-	local hugAnimation = Instance.new("Animation")
-	hugAnimation.AnimationId = HUG_ANIMATION_ID
+	-- Защищённая загрузка анимации
+	local success, loadedTrack = pcall(function()
+		local hugAnimation = Instance.new("Animation")
+		hugAnimation.AnimationId = HUG_ANIMATION_ID
+		return animator:LoadAnimation(hugAnimation)
+	end)
+
+	if not success or not loadedTrack then
+		warn("ОШИБКА: Не удалось загрузить анимацию. ID:", HUG_ANIMATION_ID, "Ошибка:", loadedTrack)
+		stopHugging()
+		return
+	end
 	
-	hugAnimTrack = animator:LoadAnimation(hugAnimation)
-	hugAnimTrack.Priority = Enum.AnimationPriority.Action -- Высокий приоритет, чтобы перебить другие анимации
-	hugAnimTrack.Looped = true
+	hugAnimTrack = loadedTrack
+	hugAnimTrack.Priority = Enum.AnimationPriority.Action
+	hugAnimTrack.Looped = true -- Устанавливаем флаг, хотя мы будем принудительно её перезапускать
 	hugAnimTrack:Play()
 	
 	local targetHRP = targetCharacter.HumanoidRootPart
 	local localHRP = localCharacter.HumanoidRootPart
 	
-	-- Основной цикл теперь отвечает ТОЛЬКО за передвижение. Анимация работает сама по себе.
 	hugLoopConnection = RunService.RenderStepped:Connect(function()
 		if not isHugging or not currentTarget or not currentTarget.Parent or not targetCharacter or not targetCharacter.Parent or targetCharacter.Humanoid.Health <= 0 then
 			stopHugging()
@@ -285,6 +292,11 @@ local function startHugging()
 		local targetCFrame = targetHRP.CFrame * offset
 		local newCFrame = CFrame.new(targetCFrame.Position, targetHRP.Position)
 		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2)
+		
+		-- ПРИНУДИТЕЛЬНЫЙ ЦИКЛ: Гарантирует, что анимация всегда проигрывается
+		if hugAnimTrack and not hugAnimTrack.IsPlaying then
+			hugAnimTrack:Play()
+		end
 	end)
 end
 
@@ -344,7 +356,7 @@ toggleButton.MouseButton1Click:Connect(function()
 end)
 closeButton.MouseButton1Click:Connect(function()
 	screenGui:Destroy()
-	stopHugging() -- Убедимся, что анимация прекратится при закрытии
+	stopHugging()
 end)
 local isMinimized = false
 local originalSize = mainFrame.Size
@@ -387,4 +399,4 @@ end)
 updatePlayerList()
 updateButtons()
 
-print("Hug Script v1.7 (Visible to All) by Advanced AI Loaded!")
+print("Hug Script v1.8 (Fault-Tolerant) by Advanced AI Loaded!")
