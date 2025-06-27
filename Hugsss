@@ -1,13 +1,12 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.8 (РЕАЛИЗОВАН ОТКАЗОУСТОЙЧИВЫЙ МЕХАНИЗМ АНИМАЦИИ)
+	Версия: 1.9 (РЕАЛИЗОВАНА ПРЕДЗАГРУЗКА ОБЪЕКТА ANIMATION)
 	
 	Особенности:
+	- Объект Animation создаётся один раз при запуске для повышения производительности.
 	- Объятия видны всем игрокам на сервере.
-	- Использована R15-совместимая анимация.
-	- Реализован принудительный цикл анимации для 100% стабильности позы.
-	- Добавлена защищённая загрузка анимации для предотвращения ошибок.
+	- Используется R15-совместимая анимация с принудительным циклом для 100% стабильности.
 	- Все предыдущие исправления (GUI, прокрутка, список) сохранены.
 ]]
 
@@ -27,8 +26,15 @@ local currentTarget = nil
 local hugLoopConnection = nil
 local hugAnimTrack = nil
 
--- ИЗМЕНЕНИЕ: ID R15-совместимой анимации. "Zombie" имеет подходящую позу с вытянутыми руками.
+-- ID R15-совместимой анимации.
 local HUG_ANIMATION_ID = "rbxassetid://524319739"
+
+-- ИЗМЕНЕНИЕ: Создаем объект Animation один раз при запуске скрипта.
+-- Это более производительно и соответствует запросу.
+local hugAnimation = Instance.new("Animation")
+hugAnimation.Name = "HugAnimationObject"
+hugAnimation.AnimationId = 70577781390587
+hugAnimation.Parent = script -- Привязываем его к самому скрипту для порядка
 
 --// ФУНКЦИИ GUI //--
 
@@ -210,7 +216,7 @@ screenGui.Parent = PlayerGui
 local function updateButtons()
 	hugButton.Visible = not isHugging
 	stopButton.Visible = isHugging
-	
+
 	hugButton.Selectable = (currentTarget ~= nil)
 	if currentTarget then
 		hugButton.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
@@ -225,30 +231,29 @@ end
 local function stopHugging()
 	if not isHugging then return end
 	isHugging = false
-	
+
 	if hugLoopConnection then
 		hugLoopConnection:Disconnect()
 		hugLoopConnection = nil
 	end
-	
+
 	if hugAnimTrack then
 		hugAnimTrack:Stop()
 		hugAnimTrack:Destroy()
 		hugAnimTrack = nil
 	end
-	
+
 	updateButtons()
 end
 
 -- Функция для начала объятий
 local function startHugging()
 	if isHugging or not currentTarget or not currentTarget.Parent then return end
-	
-	-- Максимально надёжное получение всех компонентов
+
 	local localCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 	local humanoid = localCharacter:WaitForChild("Humanoid")
 	local animator = humanoid:WaitForChild("Animator")
-	
+
 	local targetCharacter = currentTarget.Character
 	if not targetCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") then
 		stopHugging()
@@ -256,44 +261,40 @@ local function startHugging()
 		updateButtons()
 		return
 	end
-	
+
 	isHugging = true
 	updateButtons()
-	
-	-- Защищённая загрузка анимации
+
+	-- Защищённая загрузка анимации из уже существующего объекта
 	local success, loadedTrack = pcall(function()
-		local hugAnimation = Instance.new("Animation")
-		hugAnimation.AnimationId = HUG_ANIMATION_ID
 		return animator:LoadAnimation(hugAnimation)
 	end)
 
 	if not success or not loadedTrack then
-		warn("ОШИБКА: Не удалось загрузить анимацию. ID:", HUG_ANIMATION_ID, "Ошибка:", loadedTrack)
+		warn("ОШИБКА: Не удалось загрузить анимацию из объекта. Ошибка:", loadedTrack)
 		stopHugging()
 		return
 	end
-	
+
 	hugAnimTrack = loadedTrack
 	hugAnimTrack.Priority = Enum.AnimationPriority.Action
-	hugAnimTrack.Looped = true -- Устанавливаем флаг, хотя мы будем принудительно её перезапускать
+	hugAnimTrack.Looped = true
 	hugAnimTrack:Play()
-	
+
 	local targetHRP = targetCharacter.HumanoidRootPart
 	local localHRP = localCharacter.HumanoidRootPart
-	
+
 	hugLoopConnection = RunService.RenderStepped:Connect(function()
 		if not isHugging or not currentTarget or not currentTarget.Parent or not targetCharacter or not targetCharacter.Parent or targetCharacter.Humanoid.Health <= 0 then
 			stopHugging()
 			return
 		end
-		
-		-- Позиционирование игрока
+
 		local offset = CFrame.new(0, 0, -1.8)
 		local targetCFrame = targetHRP.CFrame * offset
 		local newCFrame = CFrame.new(targetCFrame.Position, targetHRP.Position)
 		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2)
-		
-		-- ПРИНУДИТЕЛЬНЫЙ ЦИКЛ: Гарантирует, что анимация всегда проигрывается
+
 		if hugAnimTrack and not hugAnimTrack.IsPlaying then
 			hugAnimTrack:Play()
 		end
@@ -303,29 +304,29 @@ end
 -- Функция для обновления списка игроков
 local function updatePlayerList()
 	local selectedPlayerName = currentTarget and currentTarget.Name
-	
+
 	for _, child in ipairs(playerList:GetChildren()) do
 		if child:IsA("TextButton") then
 			child:Destroy()
 		end
 	end
-	
+
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
 			local templateClone = playerTemplate:Clone()
-			
+
 			local success, content = pcall(function()
 				return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
 			end)
 			if success and content then
 				templateClone.Avatar.Image = content
 			end
-			
+
 			templateClone.PlayerName.Text = string.format("%s\n<font color='#AAAAAA'>@%s</font>", player.DisplayName, player.Name)
 			templateClone.PlayerName.RichText = true
 			templateClone.Name = player.Name
 			templateClone.Parent = playerList
-			
+
 			templateClone.MouseButton1Click:Connect(function()
 				currentTarget = player
 				for _, btn in ipairs(playerList:GetChildren()) do
@@ -335,13 +336,13 @@ local function updatePlayerList()
 				end
 				updateButtons()
 			end)
-			
+
 			if player.Name == selectedPlayerName then
 				templateClone.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
 			end
 		end
 	end
-	
+
 	playerList.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
 end
 
@@ -399,4 +400,4 @@ end)
 updatePlayerList()
 updateButtons()
 
-print("Hug Script v1.8 (Fault-Tolerant) by Advanced AI Loaded!")
+print("Hug Script v1.9 (Preloaded Animation) by Advanced AI Loaded!")
