@@ -1,116 +1,186 @@
 --[[
-	ФИНАЛЬНАЯ ВЕРСИЯ
-	Локальный скрипт для создания перетаскиваемой кнопки,
-	которая открывает и закрывает консоль разработчика Roblox.
+	ФИНАЛЬНАЯ ВЕРСИЯ С КОПИРОВАНИЕМ ЛОГОВ
 	
-	Исправлена проблема с перетаскиванием на мобильных устройствах
-	путем переключения на абсолютную пиксельную систему позиционирования во время перетаскивания.
+	Создает перетаскиваемую панель с двумя кнопками:
+	1. [C] - Открыть/закрыть консоль разработчика.
+	2. [📋] - Скопировать все логи из консоли в буфер обмена.
+	
+	Оптимизировано для ПК и мобильных устройств.
 ]]
 
 -- Сервисы
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 local StarterGui = game:GetService("StarterGui")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local LogService = game:GetService("LogService")
 
--- Переменные состояния
+-- --- Настройки и переменные состояния ---
+local MAX_LOGS = 250 -- Максимальное количество строк лога для хранения в памяти
+local capturedLogs = {} -- Таблица для хранения логов
+
 local isDragging = false
 local consoleVisible = false
 local dragStartPos = nil
-local buttonStartPixelPos = nil -- Будем хранить абсолютную позицию кнопки в пикселях
-local dragThreshold = 10
+local frameStartPixelPos = nil
 
--- Создание GUI
+-- --- Сбор логов ---
+-- Эта функция будет вызываться каждый раз, когда в консоль выводится новое сообщение
+LogService.MessageOut:Connect(function(message, messageType)
+	-- Форматируем сообщение, чтобы было понятно, какого оно типа (Info, Warning, Error)
+	local formattedMessage = string.format("[%s]: %s", tostring(messageType), message)
+	table.insert(capturedLogs, formattedMessage)
+	
+	-- Если логов стало слишком много, удаляем самое старое сообщение
+	if #capturedLogs > MAX_LOGS then
+		table.remove(capturedLogs, 1)
+	end
+end)
+
+-- --- Создание GUI ---
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ConsoleToggleGui"
+screenGui.Name = "ConsoleUtilsGui"
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
--- Создание кнопки
-local toggleButton = Instance.new("TextButton")
-toggleButton.Name = "ConsoleToggleButton"
-toggleButton.Text = "C"
-toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.Font = Enum.Font.SourceSansBold
-toggleButton.TextSize = 24
-toggleButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-toggleButton.BorderColor3 = Color3.fromRGB(30, 30, 30)
-toggleButton.BorderSizePixel = 2
-toggleButton.AutoButtonColor = false
-
--- Размер и НАЧАЛЬНАЯ позиция/якорь
-toggleButton.Size = UDim2.fromOffset(45, 45)
-toggleButton.Position = UDim2.new(1, -55, 1, -55) -- 55px от правого-нижнего края
-toggleButton.AnchorPoint = Vector2.new(1, 1) -- Якорь в правом-нижнем углу
+-- Создаем главную панель (фрейм), которая будет содержать кнопки и которую можно будет перетаскивать
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "DraggableFrame"
+mainFrame.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+mainFrame.BorderColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 2
+mainFrame.Size = UDim2.fromOffset(95, 45) -- Ширина для двух кнопок + отступ
+mainFrame.Position = UDim2.new(1, -105, 1, -55) -- Начальная позиция
+mainFrame.AnchorPoint = Vector2.new(1, 1)
+mainFrame.Parent = screenGui
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = toggleButton
+corner.Parent = mainFrame
 
-toggleButton.Parent = screenGui
+-- Используем UIListLayout для автоматического расположения кнопок внутри фрейма
+local layout = Instance.new("UIListLayout")
+layout.FillDirection = Enum.FillDirection.Horizontal
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.VerticalAlignment = Enum.VerticalAlignment.Center
+layout.Padding = UDim.new(0, 5)
+layout.Parent = mainFrame
 
--- --- Логика ---
+-- Кнопка открытия/закрытия консоли
+local consoleButton = Instance.new("TextButton")
+consoleButton.Name = "ConsoleToggleButton"
+consoleButton.LayoutOrder = 1
+consoleButton.Size = UDim2.fromOffset(40, 40)
+consoleButton.Font = Enum.Font.SourceSansBold
+consoleButton.Text = "C"
+consoleButton.TextSize = 24
+consoleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+consoleButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+consoleButton.Parent = mainFrame
 
+local consoleBtnCorner = Instance.new("UICorner")
+consoleBtnCorner.CornerRadius = UDim.new(0, 6)
+consoleBtnCorner.Parent = consoleButton
+
+-- Кнопка копирования логов
+local copyButton = Instance.new("TextButton")
+copyButton.Name = "CopyLogsButton"
+copyButton.LayoutOrder = 2
+copyButton.Size = UDim2.fromOffset(40, 40)
+copyButton.Font = Enum.Font.SourceSansBold
+copyButton.Text = "📋" -- Эмодзи буфера обмена
+copyButton.TextSize = 24
+copyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+copyButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+copyButton.Parent = mainFrame
+
+local copyBtnCorner = Instance.new("UICorner")
+copyBtnCorner.CornerRadius = UDim.new(0, 6)
+copyBtnCorner.Parent = copyButton
+
+-- --- Логика работы кнопок и перетаскивания ---
+
+-- Функция открытия/закрытия консоли
 local function toggleConsole()
 	consoleVisible = not consoleVisible
 	StarterGui:SetCore("DevConsoleVisible", consoleVisible)
 end
 
--- Когда пользователь нажимает на кнопку
-toggleButton.InputBegan:Connect(function(input)
+-- Функция копирования логов
+local function copyLogsToClipboard()
+	if #capturedLogs > 0 then
+		local fullLogString = table.concat(capturedLogs, "\n")
+		local success = pcall(function()
+			GuiService:SetClipboard(fullLogString)
+		end)
+		
+		-- Даем пользователю обратную связь
+		local originalText = copyButton.Text
+		if success then
+			copyButton.Text = "✅" -- Галочка
+		else
+			copyButton.Text = "❌" -- Крестик (в случае ошибки)
+		end
+		
+		task.delay(1.5, function()
+			copyButton.Text = originalText
+		end)
+	else
+		-- Если логов нет, тоже сообщаем
+		local originalText = copyButton.Text
+		copyButton.Text = "..."
+		task.delay(1.5, function()
+			copyButton.Text = originalText
+		end)
+	end
+end
+
+-- Подключаем функции к событиям клика по кнопкам
+consoleButton.MouseButton1Click:Connect(toggleConsole)
+copyButton.MouseButton1Click:Connect(copyLogsToClipboard)
+
+
+-- --- Логика перетаскивания всей панели ---
+
+-- Когда пользователь нажимает на панель
+mainFrame.InputBegan:Connect(function(input)
+	-- Проверяем, что это не клик по кнопке внутри (чтобы не начинать перетаскивание)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		isDragging = true
-		dragStartPos = input.Position
-		
-		-- ==== КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ====
-		-- 1. Запоминаем текущую абсолютную позицию кнопки в пикселях.
-		buttonStartPixelPos = toggleButton.AbsolutePosition
-		
-		-- 2. Немедленно переключаем позиционирование кнопки на чистый Offset от верхнего левого угла.
-		-- Это решает все проблемы с конфликтами Scale и Offset при перетаскивании.
-		toggleButton.AnchorPoint = Vector2.new(0, 0)
-		toggleButton.Position = UDim2.fromOffset(buttonStartPixelPos.X, buttonStartPixelPos.Y)
-		
-		-- Визуальный отклик
-		toggleButton.BackgroundColor3 = Color3.fromRGB(110, 110, 110)
+		if input.UserInputState == Enum.UserInputState.Begin then
+			isDragging = true
+			dragStartPos = input.Position
+			frameStartPixelPos = mainFrame.AbsolutePosition
+			
+			-- Переключаем позиционирование на абсолютное для корректного перетаскивания
+			mainFrame.AnchorPoint = Vector2.new(0, 0)
+			mainFrame.Position = UDim2.fromOffset(frameStartPixelPos.X, frameStartPixelPos.Y)
+		end
 	end
 end)
 
--- Когда пользователь отпускает палец/кнопку мыши в любом месте экрана
+-- Когда пользователь отпускает палец/кнопку мыши в любом месте
 UserInputService.InputEnded:Connect(function(input)
 	if isDragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 		isDragging = false
-		toggleButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-		
-		-- Проверяем, был ли это клик или перетаскивание
-		local dragDistance = (input.Position - dragStartPos).Magnitude
-		if dragDistance < dragThreshold then
-			toggleConsole()
-		end
 	end
 end)
 
 -- Когда пользователь двигает пальцем/мышью
 UserInputService.InputChanged:Connect(function(input)
 	if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		-- Рассчитываем смещение от начальной точки
 		local delta = input.Position - dragStartPos
+		local newPixelPos = frameStartPixelPos + delta
 		
-		-- Новая позиция = начальная пиксельная позиция + смещение
-		local newPixelPos = buttonStartPixelPos + delta
-		
-		-- Ограничиваем движение в пределах экрана
 		local screenBounds = screenGui.AbsoluteSize
-		local buttonSize = toggleButton.AbsoluteSize
+		local frameSize = mainFrame.AbsoluteSize
 		
-		local clampedX = math.clamp(newPixelPos.X, 0, screenBounds.X - buttonSize.X)
-		local clampedY = math.clamp(newPixelPos.Y, 0, screenBounds.Y - buttonSize.Y)
+		local clampedX = math.clamp(newPixelPos.X, 0, screenBounds.X - frameSize.X)
+		local clampedY = math.clamp(newPixelPos.Y, 0, screenBounds.Y - frameSize.Y)
 		
-		-- Устанавливаем новую позицию в пикселях (т.к. мы уже переключились на AnchorPoint 0,0)
-		toggleButton.Position = UDim2.fromOffset(clampedX, clampedY)
+		mainFrame.Position = UDim2.fromOffset(clampedX, clampedY)
 	end
 end)
