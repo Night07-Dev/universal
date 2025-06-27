@@ -32,7 +32,7 @@ local HUG_ANIMATION_ID = "rbxassetid://70577781390587"
 -- Создаем объект Animation один раз при запуске скрипта.
 local hugAnimation = Instance.new("Animation")
 hugAnimation.Name = "HugAnimationObject"
-hugAnimation.AnimationId = 70577781390587
+hugAnimation.AnimationId = "rbxassetid://70577781390587"
 hugAnimation.Parent = script
 
 --// ФУНКЦИИ GUI //--
