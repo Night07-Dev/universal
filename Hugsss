@@ -1,7 +1,7 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.0
+	Версия: 1.1 (Исправлена проблема с приоритетом анимации)
 	
 	Особенности:
 	- Перетаскиваемый GUI и кнопка-переключатель
@@ -266,6 +266,7 @@ local function stopHugging()
 
 	if hugAnimTrack then
 		hugAnimTrack:Stop()
+		hugAnimTrack:Destroy() -- ИЗМЕНЕНИЕ: Лучше уничтожать трек после использования
 		hugAnimTrack = nil
 	end
 
@@ -281,7 +282,8 @@ local function startHugging()
 	local targetCharacter = currentTarget.Character
 	local localCharacter = LocalPlayer.Character
 
-	if not targetCharacter or not localCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") or not localCharacter:FindFirstChild("Humanoid") then
+	-- ИЗМЕНЕНИЕ: Добавлена проверка на Animator
+	if not targetCharacter or not localCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") or not localCharacter:FindFirstChild("Humanoid") or not localCharacter.Humanoid:FindFirstChild("Animator") then
 		stopHugging()
 		currentTarget = nil -- Сбрасываем цель, если она невалидна
 		updateButtons()
@@ -295,10 +297,15 @@ local function startHugging()
 	local localHRP = localCharacter.HumanoidRootPart
 	local localHumanoid = localCharacter.Humanoid
 
+	-- ИЗМЕНЕНИЕ: Используем Animator и устанавливаем приоритет
+	local animator = localHumanoid:WaitForChild("Animator")
+
 	-- Загружаем и проигрываем анимацию
 	local hugAnimation = Instance.new("Animation")
 	hugAnimation.AnimationId = HUG_ANIMATION_ID
-	hugAnimTrack = localHumanoid:LoadAnimation(hugAnimation)
+
+	hugAnimTrack = animator:LoadAnimation(hugAnimation)
+	hugAnimTrack.Priority = Enum.AnimationPriority.Action -- <--- САМОЕ ВАЖНОЕ ИЗМЕНЕНИЕ
 	hugAnimTrack.Looped = true
 	hugAnimTrack:Play()
 
@@ -440,4 +447,4 @@ end)
 updatePlayerList()
 updateButtons()
 
-print("Hug Script by Advanced AI Loaded!")
+print("Hug Script v1.1 by Advanced AI Loaded!")
