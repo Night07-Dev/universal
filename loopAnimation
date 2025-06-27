@@ -1,0 +1,73 @@
+-- LocalScript для воспроизведения зацикленной анимации в Roblox
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Константы
+local ANIMATION_ID = "rbxassetid://70577781390587" -- ID анимации
+local LOOP_ANIMATION = true -- Зацикливание анимации
+local ANIMATION_PRIORITY = Enum.AnimationPriority.Action -- Приоритет анимации
+
+-- Получаем локального игрока
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Функция для загрузки и воспроизведения анимации
+local function playAnimation()
+	-- Проверяем, существует ли humanoid
+	if not humanoid then
+		warn("Humanoid не найден для персонажа " .. player.Name)
+		return
+	end
+
+	-- Создаем объект анимации
+	local animation = Instance.new("Animation")
+	animation.AnimationId = ANIMATION_ID
+
+	-- Загружаем анимацию в humanoid
+	local animationTrack
+	local success, errorMsg = pcall(function()
+		animationTrack = humanoid:LoadAnimation(animation)
+	end)
+
+	-- Проверяем успешность загрузки
+	if not success then
+		warn("Ошибка загрузки анимации: " .. errorMsg)
+		return
+	end
+
+	-- Настраиваем параметры анимации
+	animationTrack.Looped = LOOP_ANIMATION
+	animationTrack.Priority = ANIMATION_PRIORITY
+
+	-- Воспроизводим анимацию
+	local playSuccess, playError = pcall(function()
+		animationTrack:Play()
+	end)
+
+	if not playSuccess then
+		warn("Ошибка воспроизведения анимации: " .. playError)
+		return
+	end
+
+	-- Логируем успешное воспроизведение
+	print("Анимация с ID " .. ANIMATION_ID .. " успешно запущена для " .. player.Name)
+end
+
+-- Обработка добавления нового персонажа (например, после смерти/возрождения)
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoid = newCharacter:WaitForChild("Humanoid")
+	playAnimation()
+end)
+
+-- Запускаем анимацию для текущего персонажа
+playAnimation()
+
+-- Очистка при уничтожении скрипта
+game:BindToClose(function()
+	if animationTrack then
+		animationTrack:Stop()
+		animationTrack:Destroy()
+	end
+end)
