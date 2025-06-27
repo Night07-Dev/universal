@@ -1,0 +1,325 @@
+--[[
+	Скрипт для следования за игроком с продвинутым GUI
+	Автор: Модель искусственного интеллекта
+	Версия: 1.1
+
+	Функционал:
+	- GUI создается программно, не требует дополнительных объектов.
+	- Окно можно перетаскивать, сворачивать и закрывать.
+	- Подтверждение перед закрытием с полным удалением скрипта.
+	- Динамический список всех игроков на сервере с аватарами.
+	- Плавное следование за выбранной целью.
+	- Обработка выхода игроков и других крайних случаев.
+]]
+
+--// СЕРВИСЫ
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local ContentProvider = game:GetService("ContentProvider")
+
+--// ЛОКАЛЬНЫЙ ИГРОК
+local localPlayer = Players.LocalPlayer
+if not localPlayer then
+	return -- Скрипт не будет работать на сервере
+end
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+--// НАСТРОЙКИ
+local THEME = {
+	Background = Color3.fromRGB(45, 45, 45),
+	Primary = Color3.fromRGB(60, 60, 60),
+	Secondary = Color3.fromRGB(80, 80, 80),
+	Accent = Color3.fromRGB(0, 120, 215),
+	Text = Color3.fromRGB(255, 255, 255),
+	TextSecondary = Color3.fromRGB(180, 180, 180),
+	Success = Color3.fromRGB(30, 200, 30),
+	Danger = Color3.fromRGB(220, 40, 40),
+	Dimmer = Color3.fromRGB(0, 0, 0),
+}
+
+--// ПЕРЕМЕННЫЕ СОСТОЯНИЯ
+local isFollowing = false
+local targetPlayer = nil
+local selectedPlayer = nil
+local connections = {} -- Таблица для хранения всех соединений событий
+
+--// СОЗДАНИЕ GUI ЭЛЕМЕНТОВ (ПРОГРАММНО)
+
+-- Главный контейнер
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FollowPlayerGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Кнопка для открытия свернутого меню
+local openButton = Instance.new("TextButton")
+openButton.Name = "OpenButton"
+openButton.Size = UDim2.new(0, 120, 0, 30)
+openButton.Position = UDim2.new(0, 10, 0, 10)
+openButton.BackgroundColor3 = THEME.Primary
+openButton.BorderColor3 = THEME.Accent
+openButton.BorderSizePixel = 1
+openButton.TextColor3 = THEME.Text
+openButton.Text = "Следить"
+openButton.Font = Enum.Font.SourceSansBold
+openButton.TextSize = 16
+openButton.Visible = true
+openButton.Parent = screenGui
+
+local cornerOpen = Instance.new("UICorner")
+cornerOpen.CornerRadius = UDim.new(0, 6)
+cornerOpen.Parent = openButton
+
+-- Главное окно
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 400)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+mainFrame.BackgroundColor3 = THEME.Background
+mainFrame.BorderSizePixel = 0
+mainFrame.Visible = false -- Изначально скрыто
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local cornerMain = Instance.new("UICorner")
+cornerMain.CornerRadius = UDim.new(0, 8)
+cornerMain.Parent = mainFrame
+
+local shadow = Instance.new("ImageLabel")
+shadow.Name = "Shadow"
+shadow.Image = "rbxassetid://6499818893" -- Мягкая тень
+shadow.ImageColor3 = Color3.new(0, 0, 0)
+shadow.ImageTransparency = 0.6
+shadow.BackgroundTransparency = 1
+shadow.ScaleType = Enum.ScaleType.Slice
+shadow.SliceCenter = Rect.new(24, 24, 25, 25)
+shadow.Size = UDim2.new(1, 16, 1, 16)
+shadow.Position = UDim2.new(0, -8, 0, -8)
+shadow.ZIndex = -1
+shadow.Parent = mainFrame
+
+-- Заголовок окна
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.BackgroundColor3 = THEME.Primary
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, -70, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundColor3 = THEME.Primary
+titleLabel.BackgroundTransparency = 1
+titleLabel.TextColor3 = THEME.Text
+titleLabel.Text = "Следить за игроком"
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 18
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+-- Кнопка "Закрыть"
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 30, 0, 25)
+closeButton.Position = UDim2.new(1, -35, 0.5, -12.5)
+closeButton.BackgroundColor3 = THEME.Primary
+closeButton.TextColor3 = THEME.Text
+closeButton.Text = "X"
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.TextSize = 20
+closeButton.Parent = titleBar
+
+-- Кнопка "Свернуть"
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "MinimizeButton"
+minimizeButton.Size = UDim2.new(0, 30, 0, 25)
+minimizeButton.Position = UDim2.new(1, -68, 0.5, -12.5)
+minimizeButton.BackgroundColor3 = THEME.Primary
+minimizeButton.TextColor3 = THEME.Text
+minimizeButton.Text = "—"
+minimizeButton.Font = Enum.Font.SourceSansBold
+minimizeButton.TextSize = 20
+minimizeButton.Parent = titleBar
+
+-- Список игроков (остальной GUI без изменений)
+local playerList = Instance.new("ScrollingFrame")
+playerList.Name = "PlayerList"
+playerList.Size = UDim2.new(1, -20, 1, -135)
+playerList.Position = UDim2.new(0, 10, 0, 45)
+playerList.BackgroundColor3 = THEME.Secondary
+playerList.BorderSizePixel = 0
+playerList.CanvasSize = UDim2.new(0, 0, 0, 0)
+playerList.ScrollBarImageColor3 = THEME.Accent
+playerList.ScrollBarThickness = 6
+playerList.Parent = mainFrame
+local cornerList = Instance.new("UICorner"); cornerList.CornerRadius = UDim.new(0, 6); cornerList.Parent = playerList
+local gridLayout = Instance.new("UIGridLayout"); gridLayout.CellPadding = UDim2.new(0, 5, 0, 5); gridLayout.CellSize = UDim2.new(1, -5, 0, 60); gridLayout.SortOrder = Enum.SortOrder.Name; gridLayout.Parent = playerList
+local playerTemplate = Instance.new("TextButton"); playerTemplate.Name = "PlayerTemplate"; playerTemplate.Size = UDim2.new(1, 0, 0, 60); playerTemplate.BackgroundColor3 = THEME.Primary; playerTemplate.Text = ""; playerTemplate.AutoButtonColor = false; playerTemplate.ClipsDescendants = true
+local cornerTemplate = Instance.new("UICorner"); cornerTemplate.CornerRadius = UDim.new(0, 6); cornerTemplate.Parent = playerTemplate
+local borderTemplate = Instance.new("UIStroke"); borderTemplate.Color = THEME.Accent; borderTemplate.Thickness = 2; borderTemplate.ApplyStrokeMode = Enum.ApplyStrokeMode.Border; borderTemplate.Enabled = false; borderTemplate.Parent = playerTemplate
+local avatarImage = Instance.new("ImageLabel"); avatarImage.Name = "AvatarImage"; avatarImage.Size = UDim2.new(0, 50, 0, 50); avatarImage.Position = UDim2.new(0, 5, 0, 5); avatarImage.BackgroundColor3 = THEME.Secondary; avatarImage.BackgroundTransparency = 1; avatarImage.Parent = playerTemplate
+local cornerAvatar = Instance.new("UICorner"); cornerAvatar.CornerRadius = UDim.new(1, 0); cornerAvatar.Parent = avatarImage
+local displayNameLabel = Instance.new("TextLabel"); displayNameLabel.Name = "DisplayNameLabel"; displayNameLabel.Size = UDim2.new(1, -65, 0, 20); displayNameLabel.Position = UDim2.new(0, 60, 0, 8); displayNameLabel.BackgroundTransparency = 1; displayNameLabel.TextColor3 = THEME.Text; displayNameLabel.Font = Enum.Font.SourceSansBold; displayNameLabel.TextSize = 16; displayNameLabel.TextXAlignment = Enum.TextXAlignment.Left; displayNameLabel.Text = "DisplayName"; displayNameLabel.Parent = playerTemplate
+local usernameLabel = Instance.new("TextLabel"); usernameLabel.Name = "UsernameLabel"; usernameLabel.Size = UDim2.new(1, -65, 0, 15); usernameLabel.Position = UDim2.new(0, 60, 0, 30); usernameLabel.BackgroundTransparency = 1; usernameLabel.TextColor3 = THEME.TextSecondary; usernameLabel.Font = Enum.Font.SourceSans; usernameLabel.TextSize = 14; usernameLabel.TextXAlignment = Enum.TextXAlignment.Left; usernameLabel.Text = "@username"; usernameLabel.Parent = playerTemplate
+local controlsFrame = Instance.new("Frame"); controlsFrame.Name = "ControlsFrame"; controlsFrame.Size = UDim2.new(1, -20, 0, 70); controlsFrame.Position = UDim2.new(0, 10, 1, -80); controlsFrame.BackgroundTransparency = 1; controlsFrame.Parent = mainFrame
+local followButton = Instance.new("TextButton"); followButton.Name = "FollowButton"; followButton.Size = UDim2.new(0.5, -5, 1, -30); followButton.BackgroundColor3 = THEME.Success; followButton.TextColor3 = THEME.Text; followButton.Text = "Следить"; followButton.Font = Enum.Font.SourceSansBold; followButton.TextSize = 16; followButton.Parent = controlsFrame
+local cornerFollow = Instance.new("UICorner"); cornerFollow.CornerRadius = UDim.new(0, 6); cornerFollow.Parent = followButton
+local stopButton = Instance.new("TextButton"); stopButton.Name = "StopButton"; stopButton.Size = UDim2.new(0.5, -5, 1, -30); stopButton.Position = UDim2.new(0.5, 5, 0, 0); stopButton.BackgroundColor3 = THEME.Danger; stopButton.TextColor3 = THEME.Text; stopButton.Text = "Прекратить"; stopButton.Font = Enum.Font.SourceSansBold; stopButton.TextSize = 16; stopButton.Parent = controlsFrame
+local cornerStop = Instance.new("UICorner"); cornerStop.CornerRadius = UDim.new(0, 6); cornerStop.Parent = stopButton
+local statusLabel = Instance.new("TextLabel"); statusLabel.Name = "StatusLabel"; statusLabel.Size = UDim2.new(1, 0, 0, 25); statusLabel.Position = UDim2.new(0, 0, 1, 0); statusLabel.BackgroundTransparency = 1; statusLabel.TextColor3 = THEME.TextSecondary; statusLabel.Font = Enum.Font.SourceSans; statusLabel.TextSize = 14; statusLabel.Text = "Статус: Ожидание"; statusLabel.TextYAlignment = Enum.TextYAlignment.Bottom; statusLabel.Parent = controlsFrame
+
+--// --- НОВОЕ: ЭЛЕМЕНТЫ ПОДТВЕРЖДЕНИЯ ---
+
+-- Затемняющий фон
+local dimmerOverlay = Instance.new("Frame")
+dimmerOverlay.Name = "DimmerOverlay"
+dimmerOverlay.Size = UDim2.new(1, 0, 1, 0)
+dimmerOverlay.BackgroundColor3 = THEME.Dimmer
+dimmerOverlay.BackgroundTransparency = 1 -- Изначально полностью прозрачный
+dimmerOverlay.ZIndex = 10
+dimmerOverlay.Visible = false
+dimmerOverlay.Parent = mainFrame
+
+-- Окно подтверждения
+local confirmationFrame = Instance.new("Frame")
+confirmationFrame.Name = "ConfirmationFrame"
+confirmationFrame.Size = UDim2.new(0, 260, 0, 120)
+confirmationFrame.Position = UDim2.new(0.5, -130, 0.5, -60)
+confirmationFrame.BackgroundColor3 = THEME.Primary
+confirmationFrame.BorderSizePixel = 1
+confirmationFrame.BorderColor3 = THEME.Secondary
+confirmationFrame.ZIndex = 11
+confirmationFrame.Visible = false
+confirmationFrame.Parent = mainFrame
+
+local cornerConfirm = Instance.new("UICorner")
+cornerConfirm.CornerRadius = UDim.new(0, 8)
+cornerConfirm.Parent = confirmationFrame
+
+local confirmationLabel = Instance.new("TextLabel")
+confirmationLabel.Name = "ConfirmationLabel"
+confirmationLabel.Size = UDim2.new(1, -20, 0, 50)
+confirmationLabel.Position = UDim2.new(0, 10, 0, 10)
+confirmationLabel.BackgroundTransparency = 1
+confirmationLabel.TextColor3 = THEME.Text
+confirmationLabel.Font = Enum.Font.SourceSans
+confirmationLabel.TextSize = 16
+confirmationLabel.TextWrapped = true
+confirmationLabel.Text = "Вы уверены, что хотите закрыть и удалить скрипт навсегда?"
+confirmationLabel.Parent = confirmationFrame
+
+local confirmYesButton = Instance.new("TextButton")
+confirmYesButton.Name = "ConfirmYesButton"
+confirmYesButton.Size = UDim2.new(0.5, -15, 0, 35)
+confirmYesButton.Position = UDim2.new(0, 10, 1, -45)
+confirmYesButton.BackgroundColor3 = THEME.Danger
+confirmYesButton.TextColor3 = THEME.Text
+confirmYesButton.Font = Enum.Font.SourceSansBold
+confirmYesButton.TextSize = 16
+confirmYesButton.Text = "Да, удалить"
+confirmYesButton.Parent = confirmationFrame
+local cornerYes = Instance.new("UICorner"); cornerYes.CornerRadius = UDim.new(0, 6); cornerYes.Parent = confirmYesButton
+
+local confirmNoButton = Instance.new("TextButton")
+confirmNoButton.Name = "ConfirmNoButton"
+confirmNoButton.Size = UDim2.new(0.5, -15, 0, 35)
+confirmNoButton.Position = UDim2.new(0.5, 5, 1, -45)
+confirmNoButton.BackgroundColor3 = THEME.Secondary
+confirmNoButton.TextColor3 = THEME.Text
+confirmNoButton.Font = Enum.Font.SourceSansBold
+confirmNoButton.TextSize = 16
+confirmNoButton.Text = "Нет"
+confirmNoButton.Parent = confirmationFrame
+local cornerNo = Instance.new("UICorner"); cornerNo.CornerRadius = UDim.new(0, 6); cornerNo.Parent = confirmNoButton
+
+
+--// --- НОВЫЕ И ОБНОВЛЕННЫЕ ФУНКЦИИ ---
+
+-- Показать/скрыть окно подтверждения
+local function showConfirmation(visible)
+	local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	if visible then
+		dimmerOverlay.Visible = true
+		confirmationFrame.Visible = true
+		TweenService:Create(dimmerOverlay, tweenInfo, {BackgroundTransparency = 0.5}):Play()
+		TweenService:Create(confirmationFrame, tweenInfo, {BackgroundTransparency = 0}):Play()
+	else
+		local tweenDimmer = TweenService:Create(dimmerOverlay, tweenInfo, {BackgroundTransparency = 1})
+		local tweenFrame = TweenService:Create(confirmationFrame, tweenInfo, {BackgroundTransparency = 1})
+		tweenDimmer:Play()
+		tweenFrame:Play()
+		tweenDimmer.Completed:Wait() -- Ждем завершения анимации
+		dimmerOverlay.Visible = false
+		confirmationFrame.Visible = false
+	end
+end
+
+-- Функция полной очистки
+local function cleanupAndDestroy()
+	print("FollowPlayerGUI: Начинаю процесс удаления...")
+	stopFollowing() -- На всякий случай останавливаем слежение
+
+	-- Отключаем все соединения, чтобы избежать утечек памяти
+	for i, connection in ipairs(connections) do
+		connection:Disconnect()
+		connections[i] = nil
+	end
+
+	screenGui:Destroy() -- Удаляем GUI
+
+	-- Удаляем сам скрипт
+	print("FollowPlayerGUI: Удаление завершено.")
+	script:Destroy()
+end
+
+--// ФУНКЦИИ GUI (без изменений)
+local function updateStatus(text, color) statusLabel.Text = "Статус: " .. text; statusLabel.TextColor3 = color or THEME.TextSecondary end
+local function selectPlayerCard(player, card) for _, child in ipairs(playerList:GetChildren()) do if child:IsA("TextButton") and child.Name ~= "PlayerTemplate" then child.UIStroke.Enabled = false end end if card then card.UIStroke.Enabled = true; selectedPlayer = player; updateStatus("Выбран: " .. player.DisplayName, THEME.Accent) else selectedPlayer = nil; updateStatus("Ожидание", THEME.TextSecondary) end end
+local function addPlayerToList(player) if playerList:FindFirstChild(player.Name) then return end local playerCard = playerTemplate:Clone(); playerCard.Name = player.Name; playerCard.Parent = playerList; playerCard.DisplayNameLabel.Text = player.DisplayName; playerCard.UsernameLabel.Text = "@" .. player.Name; coroutine.wrap(function() local s, c = pcall(function() return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48) end); if s and c then playerCard.AvatarImage.Image = c else warn("Не удалось загрузить аватар для "..player.Name) end end)(); connections[#connections + 1] = playerCard.MouseButton1Click:Connect(function() if player ~= localPlayer then selectPlayerCard(player, playerCard) else updateStatus("Нельзя выбрать себя", THEME.Danger) end end) end
+local function removePlayerFromList(player) local playerCard = playerList:FindFirstChild(player.Name); if playerCard then playerCard:Destroy() end if selectedPlayer == player then selectPlayerCard(nil, nil) end if targetPlayer == player then isFollowing = false; targetPlayer = nil; updateStatus("Цель вышла из игры", THEME.Danger) end end
+local function populatePlayerList() for _, child in ipairs(playerList:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end; for _, player in ipairs(Players:GetPlayers()) do addPlayerToList(player) end end
+local function startFollowing() if not selectedPlayer then updateStatus("Сначала выберите игрока!", THEME.Danger); return end; targetPlayer = selectedPlayer; isFollowing = true; updateStatus("Слежу за " .. targetPlayer.DisplayName, THEME.Success) end
+local function stopFollowing() isFollowing = false; targetPlayer = nil; updateStatus("Слежение прекращено", THEME.TextSecondary); local c = localPlayer.Character; if c and c:FindFirstChildOfClass("Humanoid") then c.Humanoid:MoveTo(c.HumanoidRootPart.Position) end end
+
+-- Главный цикл следования (без изменений)
+connections[#connections + 1] = RunService.RenderStepped:Connect(function() if not isFollowing or not targetPlayer then return end; local lc = localPlayer.Character; local tc = targetPlayer.Character; if not lc or not lc:FindFirstChild("HumanoidRootPart") or not lc:FindFirstChildOfClass("Humanoid") then stopFollowing(); updateStatus("Ваш персонаж не найден", THEME.Danger); return end; if not tc or not tc:FindFirstChild("HumanoidRootPart") or not tc:FindFirstChildOfClass("Humanoid") or tc.Humanoid.Health <= 0 then stopFollowing(); updateStatus("Цель недоступна", THEME.Danger); return end; local tp = tc.HumanoidRootPart.Position; if (lc.HumanoidRootPart.Position - tp).Magnitude > 10 then lc.Humanoid:MoveTo(tp) end end)
+
+--// УПРАВЛЕНИЕ ОКНОМ (логика перетаскивания и сворачивания без изменений)
+local dragging, dragStart, startPos = false; local function update(input) local delta = input.Position - dragStart; mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end
+connections[#connections + 1] = titleBar.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = true; dragStart = input.Position; startPos = mainFrame.Position; input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end) end end)
+connections[#connections + 1] = UserInputService.InputChanged:Connect(function(input) if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and dragging then update(input) end end)
+local function setMainFrameVisible(visible) openButton.Visible = not visible; local sp, ep; if visible then sp = UDim2.new(0.5, -150, -0.5, 0); ep = UDim2.new(0.5, -150, 0.5, -200); mainFrame.Position = sp; mainFrame.Visible = true else sp = mainFrame.Position; ep = UDim2.new(sp.X.Scale, sp.X.Offset, -0.5, 0) end; local ti = TweenInfo.new(0.3, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out); local t = TweenService:Create(mainFrame, ti, {Position = ep}); t:Play(); if not visible then t.Completed:Wait(); mainFrame.Visible = false end end
+
+--// ПОДКЛЮЧЕНИЕ СОБЫТИЙ
+
+-- Основные события
+connections[#connections + 1] = Players.PlayerAdded:Connect(addPlayerToList)
+connections[#connections + 1] = Players.PlayerRemoving:Connect(removePlayerFromList)
+connections[#connections + 1] = followButton.MouseButton1Click:Connect(startFollowing)
+connections[#connections + 1] = stopButton.MouseButton1Click:Connect(stopFollowing)
+connections[#connections + 1] = openButton.MouseButton1Click:Connect(function() setMainFrameVisible(true) end)
+connections[#connections + 1] = minimizeButton.MouseButton1Click:Connect(function() setMainFrameVisible(false) end)
+
+-- --- НОВОЕ: ОБРАБОТЧИКИ КНОПОК ПОДТВЕРЖДЕНИЯ ---
+connections[#connections + 1] = closeButton.MouseButton1Click:Connect(function()
+	showConfirmation(true) -- Вместо удаления, показываем окно подтверждения
+end)
+
+connections[#connections + 1] = confirmNoButton.MouseButton1Click:Connect(function()
+	showConfirmation(false) -- Скрываем окно подтверждения
+end)
+
+connections[#connections + 1] = confirmYesButton.MouseButton1Click:Connect(function()
+	cleanupAndDestroy() -- Запускаем полную очистку и удаление
+end)
+
+
+--// ИНИЦИАЛИЗАЦИЯ
+populatePlayerList()
+screenGui.Parent = playerGui
+
+print("Скрипт слежения за игроком успешно загружен. Версия 1.1")
