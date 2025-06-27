@@ -1,14 +1,14 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.6 (Исправлена проблема "вялых рук" - теперь поза жёстко фиксируется)
+	Версия: 1.7 (РЕАЛИЗОВАНА ВИДИМОСТЬ ДЛЯ ВСЕХ ИГРОКОВ ЧЕРЕЗ РЕПЛИКАЦИЮ АНИМАЦИИ)
 	
 	Особенности:
-	- Перетаскиваемый GUI и кнопка-переключатель
-	- Возможность свернуть и закрыть GUI
-	- Работающий список игроков с прокруткой, аватарками, который обновляется в реальном времени
-	- Плавное управление руками с жёсткой фиксацией позы для идеального вида
-	- Оптимизация для ПК и мобильных устройств
+	- Объятия видны всем игрокам на сервере, оставаясь при этом локальным скриптом.
+	- Перетаскиваемый GUI и кнопка-переключатель.
+	- Работающий список игроков с прокруткой и аватарками.
+	- Используется стабильная, зацикленная анимация для позы объятий.
+	- Оптимизация для ПК и мобильных устройств.
 ]]
 
 --// СЕРВИСЫ //--
@@ -25,14 +25,11 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local isHugging = false
 local currentTarget = nil
 local hugLoopConnection = nil
+local hugAnimTrack = nil -- Возвращаем переменную для анимации
 
--- Переменные для управления суставами
-local rightShoulder, leftShoulder = nil, nil
-local originalRightC0, originalLeftC0 = nil, nil
-
--- Целевые CFrame для позы объятий
-local hugRightCFrame = CFrame.new(-0.2, 0.8, -0.6) * CFrame.Angles(math.rad(80), math.rad(0), math.rad(-30))
-local hugLeftCFrame = CFrame.new(0.2, 0.8, -0.6) * CFrame.Angles(math.rad(80), math.rad(0), math.rad(30))
+-- ID АНИМАЦИИ, КОТОРАЯ БУДЕТ ВИДНА ВСЕМ
+-- Используем стандартную анимацию удержания предмета. Она отлично подходит для объятий и всегда работает.
+local HUG_ANIMATION_ID = "rbxassetid://180435571"
 
 --// ФУНКЦИИ GUI //--
 
@@ -235,18 +232,12 @@ local function stopHugging()
 		hugLoopConnection = nil
 	end
 	
-	-- Плавно возвращаем руки в исходное положение
-	if rightShoulder and originalRightC0 then
-		local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad)
-		TweenService:Create(rightShoulder, tweenInfo, {C0 = originalRightC0}):Play()
+	-- Останавливаем и уничтожаем анимацию
+	if hugAnimTrack then
+		hugAnimTrack:Stop()
+		hugAnimTrack:Destroy()
+		hugAnimTrack = nil
 	end
-	if leftShoulder and originalLeftC0 then
-		local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad)
-		TweenService:Create(leftShoulder, tweenInfo, {C0 = originalLeftC0}):Play()
-	end
-	
-	rightShoulder, leftShoulder = nil, nil
-	originalRightC0, originalLeftC0 = nil, nil
 	
 	updateButtons()
 end
@@ -258,65 +249,42 @@ local function startHugging()
 	local targetCharacter = currentTarget.Character
 	local localCharacter = LocalPlayer.Character
 	
-	if not targetCharacter or not localCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") then
+	-- Проверяем наличие Animator, он нужен для проигрывания анимаций
+	if not targetCharacter or not localCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") or not localCharacter.Humanoid:FindFirstChild("Animator") then
 		stopHugging()
 		currentTarget = nil 
 		updateButtons()
 		return
 	end
 	
-	local torso = localCharacter:FindFirstChild("UpperTorso") or localCharacter:FindFirstChild("Torso")
-	if not torso then return end
-	
-	rightShoulder = torso:FindFirstChild("Right Shoulder", true)
-	leftShoulder = torso:FindFirstChild("Left Shoulder", true)
-	
-	if not rightShoulder or not leftShoulder then
-		warn("Не удалось найти суставы плеч (Motor6D).")
-		return
-	end
-	
 	isHugging = true
 	updateButtons()
 	
-	originalRightC0 = rightShoulder.C0
-	originalLeftC0 = leftShoulder.C0
+	-- ИЗМЕНЕНИЕ: Запускаем анимацию, которая будет реплицироваться
+	local animator = localCharacter.Humanoid.Animator
+	local hugAnimation = Instance.new("Animation")
+	hugAnimation.AnimationId = HUG_ANIMATION_ID
+	
+	hugAnimTrack = animator:LoadAnimation(hugAnimation)
+	hugAnimTrack.Priority = Enum.AnimationPriority.Action -- Высокий приоритет, чтобы перебить другие анимации
+	hugAnimTrack.Looped = true
+	hugAnimTrack:Play()
 	
 	local targetHRP = targetCharacter.HumanoidRootPart
 	local localHRP = localCharacter.HumanoidRootPart
 	
+	-- Основной цикл теперь отвечает ТОЛЬКО за передвижение. Анимация работает сама по себе.
 	hugLoopConnection = RunService.RenderStepped:Connect(function()
 		if not isHugging or not currentTarget or not currentTarget.Parent or not targetCharacter or not targetCharacter.Parent or targetCharacter.Humanoid.Health <= 0 then
 			stopHugging()
 			return
 		end
 		
-		-- 1. Позиционирование тела игрока (без изменений)
+		-- Позиционирование игрока
 		local offset = CFrame.new(0, 0, -1.8)
 		local targetCFrame = targetHRP.CFrame * offset
 		local newCFrame = CFrame.new(targetCFrame.Position, targetHRP.Position)
 		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2)
-		
-		-- 2. Позиционирование рук: плавный переход и жёсткая фиксация
-		-- ИЗМЕНЕНИЕ: Эта новая логика предотвращает "дрожание" рук.
-		
-		-- Для правой руки
-		if (rightShoulder.C0.Position - hugRightCFrame.Position).Magnitude > 0.01 then
-			-- Пока рука не достигла цели, плавно движем её
-			rightShoulder.C0 = rightShoulder.C0:Lerp(hugRightCFrame, 0.2)
-		else
-			-- Когда рука достигла цели, жёстко фиксируем её положение
-			rightShoulder.C0 = hugRightCFrame
-		end
-		
-		-- Для левой руки
-		if (leftShoulder.C0.Position - hugLeftCFrame.Position).Magnitude > 0.01 then
-			-- Пока рука не достигла цели, плавно движем её
-			leftShoulder.C0 = leftShoulder.C0:Lerp(hugLeftCFrame, 0.2)
-		else
-			-- Когда рука достигла цели, жёстко фиксируем её положение
-			leftShoulder.C0 = hugLeftCFrame
-		end
 	end)
 end
 
@@ -376,9 +344,7 @@ toggleButton.MouseButton1Click:Connect(function()
 end)
 closeButton.MouseButton1Click:Connect(function()
 	screenGui:Destroy()
-	if hugLoopConnection then
-		hugLoopConnection:Disconnect()
-	end
+	stopHugging() -- Убедимся, что анимация прекратится при закрытии
 end)
 local isMinimized = false
 local originalSize = mainFrame.Size
@@ -421,4 +387,4 @@ end)
 updatePlayerList()
 updateButtons()
 
-print("Hug Script v1.6 by Advanced AI Loaded!")
+print("Hug Script v1.7 (Visible to All) by Advanced AI Loaded!")
