@@ -1,13 +1,13 @@
 --[[
 	Скрипт для объятий игроков с продвинутым GUI
 	Автор: Продвинутая языковая модель
-	Версия: 1.5 (Исправлена проблема с неработающей прокруткой списка)
+	Версия: 1.6 (Исправлена проблема "вялых рук" - теперь поза жёстко фиксируется)
 	
 	Особенности:
 	- Перетаскиваемый GUI и кнопка-переключатель
 	- Возможность свернуть и закрыть GUI
 	- Работающий список игроков с прокруткой, аватарками, который обновляется в реальном времени
-	- Плавное управление руками для создания позы объятий без использования Animation
+	- Плавное управление руками с жёсткой фиксацией позы для идеального вида
 	- Оптимизация для ПК и мобильных устройств
 ]]
 
@@ -235,6 +235,7 @@ local function stopHugging()
 		hugLoopConnection = nil
 	end
 	
+	-- Плавно возвращаем руки в исходное положение
 	if rightShoulder and originalRightC0 then
 		local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad)
 		TweenService:Create(rightShoulder, tweenInfo, {C0 = originalRightC0}):Play()
@@ -290,13 +291,32 @@ local function startHugging()
 			return
 		end
 		
+		-- 1. Позиционирование тела игрока (без изменений)
 		local offset = CFrame.new(0, 0, -1.8)
 		local targetCFrame = targetHRP.CFrame * offset
 		local newCFrame = CFrame.new(targetCFrame.Position, targetHRP.Position)
 		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2)
 		
-		rightShoulder.C0 = rightShoulder.C0:Lerp(hugRightCFrame, 0.2)
-		leftShoulder.C0 = leftShoulder.C0:Lerp(hugLeftCFrame, 0.2)
+		-- 2. Позиционирование рук: плавный переход и жёсткая фиксация
+		-- ИЗМЕНЕНИЕ: Эта новая логика предотвращает "дрожание" рук.
+		
+		-- Для правой руки
+		if (rightShoulder.C0.Position - hugRightCFrame.Position).Magnitude > 0.01 then
+			-- Пока рука не достигла цели, плавно движем её
+			rightShoulder.C0 = rightShoulder.C0:Lerp(hugRightCFrame, 0.2)
+		else
+			-- Когда рука достигла цели, жёстко фиксируем её положение
+			rightShoulder.C0 = hugRightCFrame
+		end
+		
+		-- Для левой руки
+		if (leftShoulder.C0.Position - hugLeftCFrame.Position).Magnitude > 0.01 then
+			-- Пока рука не достигла цели, плавно движем её
+			leftShoulder.C0 = leftShoulder.C0:Lerp(hugLeftCFrame, 0.2)
+		else
+			-- Когда рука достигла цели, жёстко фиксируем её положение
+			leftShoulder.C0 = hugLeftCFrame
+		end
 	end)
 end
 
@@ -342,8 +362,6 @@ local function updatePlayerList()
 		end
 	end
 	
-	-- ИСПРАВЛЕНИЕ: Обновляем CanvasSize, чтобы скроллинг работал.
-	-- Это необходимо делать ПОСЛЕ добавления всех элементов в список.
 	playerList.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
 end
 
@@ -403,4 +421,4 @@ end)
 updatePlayerList()
 updateButtons()
 
-print("Hug Script v1.5 by Advanced AI Loaded!")
+print("Hug Script v1.6 by Advanced AI Loaded!")
