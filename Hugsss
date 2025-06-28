@@ -27,12 +27,12 @@ local hugLoopConnection = nil
 local hugAnimTrack = nil
 
 -- ИЗМЕНЕНИЕ: ID R15-совместимой анимации, написанный с использованием только латинских символов.
-local HUG_ANIMATION_ID = "rbxassetid://70577781390587"
+local HUG_ANIMATION_ID = "rbxassetid://119412405997272"
 
 -- Создаем объект Animation один раз при запуске скрипта.
 local hugAnimation = Instance.new("Animation")
 hugAnimation.Name = "HugAnimationObject"
-hugAnimation.AnimationId = "rbxassetid://70577781390587"
+hugAnimation.AnimationId = HUG_ANIMATION_ID
 hugAnimation.Parent = script
 
 --// ФУНКЦИИ GUI //--
@@ -215,7 +215,7 @@ screenGui.Parent = PlayerGui
 local function updateButtons()
 	hugButton.Visible = not isHugging
 	stopButton.Visible = isHugging
-	
+
 	hugButton.Selectable = (currentTarget ~= nil)
 	if currentTarget then
 		hugButton.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
@@ -230,29 +230,29 @@ end
 local function stopHugging()
 	if not isHugging then return end
 	isHugging = false
-	
+
 	if hugLoopConnection then
 		hugLoopConnection:Disconnect()
 		hugLoopConnection = nil
 	end
-	
+
 	if hugAnimTrack then
 		hugAnimTrack:Stop()
 		hugAnimTrack:Destroy()
 		hugAnimTrack = nil
 	end
-	
+
 	updateButtons()
 end
 
 -- Функция для начала объятий
 local function startHugging()
 	if isHugging or not currentTarget or not currentTarget.Parent then return end
-	
+
 	local localCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 	local humanoid = localCharacter:WaitForChild("Humanoid")
 	local animator = humanoid:WaitForChild("Animator")
-	
+
 	local targetCharacter = currentTarget.Character
 	if not targetCharacter or not targetCharacter:FindFirstChild("HumanoidRootPart") then
 		stopHugging()
@@ -260,10 +260,10 @@ local function startHugging()
 		updateButtons()
 		return
 	end
-	
+
 	isHugging = true
 	updateButtons()
-	
+
 	local success, loadedTrack = pcall(function()
 		return animator:LoadAnimation(hugAnimation)
 	end)
@@ -273,26 +273,26 @@ local function startHugging()
 		stopHugging()
 		return
 	end
-	
+
 	hugAnimTrack = loadedTrack
 	hugAnimTrack.Priority = Enum.AnimationPriority.Action
 	hugAnimTrack.Looped = true
 	hugAnimTrack:Play()
-	
+
 	local targetHRP = targetCharacter.HumanoidRootPart
 	local localHRP = localCharacter.HumanoidRootPart
-	
+
 	hugLoopConnection = RunService.RenderStepped:Connect(function()
 		if not isHugging or not currentTarget or not currentTarget.Parent or not targetCharacter or not targetCharacter.Parent or targetCharacter.Humanoid.Health <= 0 then
 			stopHugging()
 			return
 		end
-		
+
 		local offset = CFrame.new(0, 0, -1.8)
 		local targetCFrame = targetHRP.CFrame * offset
 		local newCFrame = CFrame.new(targetCFrame.Position, targetHRP.Position)
 		localHRP.CFrame = localHRP.CFrame:Lerp(newCFrame, 0.2)
-		
+
 		if hugAnimTrack and not hugAnimTrack.IsPlaying then
 			hugAnimTrack:Play()
 		end
@@ -302,29 +302,29 @@ end
 -- Функция для обновления списка игроков
 local function updatePlayerList()
 	local selectedPlayerName = currentTarget and currentTarget.Name
-	
+
 	for _, child in ipairs(playerList:GetChildren()) do
 		if child:IsA("TextButton") then
 			child:Destroy()
 		end
 	end
-	
+
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
 			local templateClone = playerTemplate:Clone()
-			
+
 			local success, content = pcall(function()
 				return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
 			end)
 			if success and content then
 				templateClone.Avatar.Image = content
 			end
-			
+
 			templateClone.PlayerName.Text = string.format("%s\n<font color='#AAAAAA'>@%s</font>", player.DisplayName, player.Name)
 			templateClone.PlayerName.RichText = true
 			templateClone.Name = player.Name
 			templateClone.Parent = playerList
-			
+
 			templateClone.MouseButton1Click:Connect(function()
 				currentTarget = player
 				for _, btn in ipairs(playerList:GetChildren()) do
@@ -334,13 +334,13 @@ local function updatePlayerList()
 				end
 				updateButtons()
 			end)
-			
+
 			if player.Name == selectedPlayerName then
 				templateClone.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
 			end
 		end
 	end
-	
+
 	playerList.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
 end
 
