@@ -1,0 +1,168 @@
+--[[
+	Скрипт: AutoParody v3 (Автоматическое пародирование с прыжком от стен)
+	Автор: Dev-07-dev
+	Задача: Персонаж пародирует случайного игрока, меняя цель каждые 5 секунд.
+	Дополнительно: Если персонаж упирается в стену во время движения, он прыгает.
+]]
+
+--==============================================================================
+-- СЕРВИСЫ (Services)
+--==============================================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+--==============================================================================
+-- КОНФИГУРАЦИЯ (Configuration)
+--==============================================================================
+-- ВАЖНО: Замените '123456789' на ID вашего плейса.
+local TARGET_PLACE_ID = 123456789
+
+-- Как часто (в секундах) скрипт будет МЕНЯТЬ цель для пародирования.
+local TARGET_CHANGE_INTERVAL = 5
+
+-- НОВАЯ КОНФИГУРАЦИЯ: Прыжок от стен
+local JUMP_ON_COLLISION_ENABLED = true -- Включить/выключить функцию прыжка от стен
+local WALL_JUMP_COOLDOWN = 1.0 -- Задержка между прыжками от стен (в секундах)
+
+--==============================================================================
+-- ЛОКАЛЬНЫЕ ПЕРЕМЕННЫЕ (Local Variables)
+--==============================================================================
+local localPlayer = Players.LocalPlayer
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+local currentTarget = nil
+local currentTargetHumanoid = nil
+
+local movementConnection = nil
+local jumpConnection = nil
+local deathConnection = nil
+
+-- НОВАЯ ПЕРЕМЕННАЯ: для отслеживания кулдауна прыжка
+local canWallJump = true
+
+--==============================================================================
+-- ПРОВЕРКА УСЛОВИЙ (Initial Check)
+--==============================================================================
+if game.PlaceId ~= TARGET_PLACE_ID then
+	script:Destroy()
+	return
+end
+
+--==============================================================================
+-- НОВЫЙ МОДУЛЬ: ЛОГИКА ПРЫЖКА ОТ СТЕН
+--==============================================================================
+if JUMP_ON_COLLISION_ENABLED then
+	-- Эта функция будет вызываться при касании любой части тела
+	local function onBodyTouched(hitPart)
+		-- Проверяем кулдаун и движется ли персонаж вообще
+		if not canWallJump or humanoid.MoveDirection.Magnitude < 0.1 then
+			return
+		end
+
+		-- Проверяем, является ли объект, с которым столкнулись, "стеной":
+		-- 1. Он должен существовать и быть заякорен (Anchored).
+		-- 2. Он не должен быть частью другого персонажа.
+		local isObstacle = hitPart and hitPart.Anchored
+		local isAnotherCharacter = hitPart.Parent and Players:GetPlayerFromCharacter(hitPart.Parent)
+		
+		if isObstacle and not isAnotherCharacter then
+			humanoid.Jump = true
+			canWallJump = false -- Начинаем кулдаун
+			
+			-- Запускаем таймер для сброса кулдауна, не блокируя остальной код
+			task.spawn(function()
+				task.wait(WALL_JUMP_COOLDOWN)
+				canWallJump = true
+			end)
+		end
+	end
+
+	-- Подключаем функцию onBodyTouched ко всем частям тела персонажа
+	for _, part in ipairs(character:GetChildren()) do
+		if part:IsA("BasePart") then
+			part.Touched:Connect(onBodyTouched)
+		end
+	end
+end
+
+--==============================================================================
+-- ОСНОВНЫЕ ФУНКЦИИ (Core Functions)
+--==============================================================================
+
+local function cleanupConnections()
+	if movementConnection then movementConnection:Disconnect() end
+	if jumpConnection then jumpConnection:Disconnect() end
+	if deathConnection then deathConnection:Disconnect() end
+	movementConnection, jumpConnection, deathConnection = nil, nil, nil
+	
+	if humanoid and humanoid.Health > 0 then
+		humanoid:MoveTo(rootPart.Position)
+	end
+end
+
+local function startParodying()
+	if not currentTarget or not currentTarget:IsDescendantOf(Workspace) then return end
+	
+	local targetRootPart = currentTarget:FindFirstChild("HumanoidRootPart")
+	currentTargetHumanoid = currentTarget:FindFirstChildOfClass("Humanoid")
+
+	if not targetRootPart or not currentTargetHumanoid then return end
+
+	movementConnection = RunService.Heartbeat:Connect(function()
+		if currentTarget and targetRootPart and targetRootPart.Parent then
+			humanoid:MoveTo(targetRootPart.Position)
+		else
+			cleanupConnections()
+		end
+	end)
+
+	jumpConnection = currentTargetHumanoid.StateChanged:Connect(function(oldState, newState)
+		if newState == Enum.HumanoidStateType.Jumping then
+			humanoid.Jump = true
+		end
+	end)
+
+	deathConnection = currentTargetHumanoid.Died:Connect(function()
+		cleanupConnections()
+	end)
+end
+
+local function findAndSwitchTarget()
+	local previousTarget = currentTarget
+	cleanupConnections()
+
+	local potentialTargets = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			if player.Character ~= previousTarget then
+				table.insert(potentialTargets, player.Character)
+			end
+		end
+	end
+	
+	if #potentialTargets == 0 then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+				table.insert(potentialTargets, player.Character)
+			end
+		end
+	end
+
+	if #potentialTargets > 0 then
+		currentTarget = potentialTargets[math.random(1, #potentialTargets)]
+		startParodying()
+	else
+		currentTarget = nil
+	end
+end
+
+--==============================================================================
+-- ЗАПУСК СКРИПТА (Execution)
+--==============================================================================
+while task.wait(TARGET_CHANGE_INTERVAL) do
+	if not character or not character.Parent then break end
+	findAndSwitchTarget()
+end
