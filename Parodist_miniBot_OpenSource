@@ -1,8 +1,8 @@
 --[[
-	Скрипт: AutoParody v4 (Исправленный прыжок от стен)
-	Автор: Night07-Dev
+	Скрипт: AutoParody v5 (Финальная версия с Raycast-прыжком)
+	Автор: GPT-4
 	Задача: Персонаж пародирует случайного игрока, меняя цель каждые 5 секунд.
-	Дополнительно: Если персонаж упирается в стену во время движения, он прыгает.
+	Дополнительно: Если путь к цели преграждает стена, персонаж прыгает.
 ]]
 
 --==============================================================================
@@ -20,7 +20,8 @@ local TARGET_PLACE_ID = 116495829188952
 
 local TARGET_CHANGE_INTERVAL = 5
 local JUMP_ON_COLLISION_ENABLED = true
-local WALL_JUMP_COOLDOWN = 1.0
+local WALL_JUMP_COOLDOWN = 0.75 -- Сделаем кулдаун чуть меньше для отзывчивости
+local RAY_DISTANCE = 3 -- Длина луча для проверки стены (в стадах)
 
 --==============================================================================
 -- ЛОКАЛЬНЫЕ ПЕРЕМЕННЫЕ (Local Variables)
@@ -34,6 +35,10 @@ local currentTarget = nil
 local movementConnection, jumpConnection, deathConnection = nil, nil, nil
 local canWallJump = true
 
+-- Параметры для луча, чтобы он игнорировал нашего и целевого персонажа
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
 --==============================================================================
 -- ПРОВЕРКА УСЛОВИЙ (Initial Check)
 --==============================================================================
@@ -43,30 +48,42 @@ if game.PlaceId ~= TARGET_PLACE_ID then
 end
 
 --==============================================================================
--- ИСПРАВЛЕННЫЙ МОДУЛЬ: ЛОГИКА ПРЫЖКА ПРИ ЗАСТРЕВАНИИ
+-- ФИНАЛЬНЫЙ МОДУЛЬ: ЛОГИКА ПРЫЖКА ЧЕРЕЗ RAYCAST
 --==============================================================================
 if JUMP_ON_COLLISION_ENABLED then
 	RunService.Heartbeat:Connect(function()
-		-- Проверяем, можно ли сейчас прыгать (кулдаун) и есть ли вообще цель
-		if not canWallJump or not currentTarget then
+		-- Проверяем, можно ли прыгать, есть ли цель и находится ли персонаж на земле
+		local currentState = humanoid:GetState()
+		if not canWallJump or not currentTarget or not (currentState == Enum.HumanoidStateType.Running or currentState == Enum.HumanoidStateType.Landed) then
 			return
 		end
 		
-		-- Получаем реальную скорость персонажа, игнорируя вертикальную ось (падение/прыжок)
-		local horizontalSpeed = Vector2.new(rootPart.AssemblyLinearVelocity.X, rootPart.AssemblyLinearVelocity.Z).Magnitude
-		local currentState = humanoid:GetState()
+		local targetRootPart = currentTarget:FindFirstChild("HumanoidRootPart")
+		if not targetRootPart then return end
+
+		-- 1. Определяем направление к цели (только по горизонтали)
+		local origin = rootPart.Position
+		local direction = (targetRootPart.Position - origin) * Vector3.new(1, 0, 1)
+
+		-- Если цель очень близко, не стреляем лучом
+		if direction.Magnitude < 1 then return end
+
+		-- 2. Пускаем луч
+		local raycastResult = Workspace:Raycast(origin, direction.Unit * RAY_DISTANCE, raycastParams)
 		
-		-- УСЛОВИЕ ДЛЯ ПРЫЖКА:
-		-- 1. Персонаж находится в состоянии бега (не падает, не плавает, не сидит).
-		-- 2. Его горизонтальная скорость очень низкая (он застрял).
-		if currentState == Enum.HumanoidStateType.Running and horizontalSpeed < 0.5 then
-			humanoid.Jump = true
-			canWallJump = false -- Активируем кулдаун
-			
-			task.spawn(function()
-				task.wait(WALL_JUMP_COOLDOWN)
-				canWallJump = true
-			end)
+		-- 3. Если луч во что-то попал - это препятствие
+		if raycastResult then
+			-- Проверяем, что это не часть пола, а именно стена (по нормали)
+			-- Угол > 30 градусов от вертикали считается стеной
+			if math.abs(raycastResult.Normal.Y) < 0.85 then
+				humanoid.Jump = true
+				canWallJump = false
+				
+				task.spawn(function()
+					task.wait(WALL_JUMP_COOLDOWN)
+					canWallJump = true
+				end)
+			end
 		end
 	end)
 end
@@ -88,6 +105,9 @@ end
 
 local function startParodying()
 	if not currentTarget or not currentTarget:IsDescendantOf(Workspace) then return end
+	
+	-- Обновляем фильтр для луча, чтобы он игнорировал новую цель
+	raycastParams.FilterDescendantsInstances = {character, currentTarget}
 	
 	local targetRootPart = currentTarget:FindFirstChild("HumanoidRootPart")
 	local currentTargetHumanoid = currentTarget:FindFirstChildOfClass("Humanoid")
@@ -139,12 +159,14 @@ local function findAndSwitchTarget()
 		startParodying()
 	else
 		currentTarget = nil
+		raycastParams.FilterDescendantsInstances = {character} -- Если целей нет, игнорируем только себя
 	end
 end
 
 --==============================================================================
 -- ЗАПУСК СКРИПТА (Execution)
 --==============================================================================
+raycastParams.FilterDescendantsInstances = {character} -- Изначально игнорируем только себя
 while task.wait(TARGET_CHANGE_INTERVAL) do
 	if not character or not character.Parent then break end
 	findAndSwitchTarget()
