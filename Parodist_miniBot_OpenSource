@@ -1,6 +1,6 @@
 --[[
-	Скрипт: AutoParody v3 (Автоматическое пародирование с прыжком от стен)
-	Автор: Dev-07-dev
+	Скрипт: AutoParody v4 (Исправленный прыжок от стен)
+	Автор: Night07-Dev
 	Задача: Персонаж пародирует случайного игрока, меняя цель каждые 5 секунд.
 	Дополнительно: Если персонаж упирается в стену во время движения, он прыгает.
 ]]
@@ -18,12 +18,9 @@ local Workspace = game:GetService("Workspace")
 -- ВАЖНО: Замените '123456789' на ID вашего плейса.
 local TARGET_PLACE_ID = 116495829188952
 
--- Как часто (в секундах) скрипт будет МЕНЯТЬ цель для пародирования.
 local TARGET_CHANGE_INTERVAL = 5
-
--- НОВАЯ КОНФИГУРАЦИЯ: Прыжок от стен
-local JUMP_ON_COLLISION_ENABLED = true -- Включить/выключить функцию прыжка от стен
-local WALL_JUMP_COOLDOWN = 1.0 -- Задержка между прыжками от стен (в секундах)
+local JUMP_ON_COLLISION_ENABLED = true
+local WALL_JUMP_COOLDOWN = 1.0
 
 --==============================================================================
 -- ЛОКАЛЬНЫЕ ПЕРЕМЕННЫЕ (Local Variables)
@@ -34,13 +31,7 @@ local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
 
 local currentTarget = nil
-local currentTargetHumanoid = nil
-
-local movementConnection = nil
-local jumpConnection = nil
-local deathConnection = nil
-
--- НОВАЯ ПЕРЕМЕННАЯ: для отслеживания кулдауна прыжка
+local movementConnection, jumpConnection, deathConnection = nil, nil, nil
 local canWallJump = true
 
 --==============================================================================
@@ -52,40 +43,32 @@ if game.PlaceId ~= TARGET_PLACE_ID then
 end
 
 --==============================================================================
--- НОВЫЙ МОДУЛЬ: ЛОГИКА ПРЫЖКА ОТ СТЕН
+-- ИСПРАВЛЕННЫЙ МОДУЛЬ: ЛОГИКА ПРЫЖКА ПРИ ЗАСТРЕВАНИИ
 --==============================================================================
 if JUMP_ON_COLLISION_ENABLED then
-	-- Эта функция будет вызываться при касании любой части тела
-	local function onBodyTouched(hitPart)
-		-- Проверяем кулдаун и движется ли персонаж вообще
-		if not canWallJump or humanoid.MoveDirection.Magnitude < 0.1 then
+	RunService.Heartbeat:Connect(function()
+		-- Проверяем, можно ли сейчас прыгать (кулдаун) и есть ли вообще цель
+		if not canWallJump or not currentTarget then
 			return
 		end
-
-		-- Проверяем, является ли объект, с которым столкнулись, "стеной":
-		-- 1. Он должен существовать и быть заякорен (Anchored).
-		-- 2. Он не должен быть частью другого персонажа.
-		local isObstacle = hitPart and hitPart.Anchored
-		local isAnotherCharacter = hitPart.Parent and Players:GetPlayerFromCharacter(hitPart.Parent)
 		
-		if isObstacle and not isAnotherCharacter then
+		-- Получаем реальную скорость персонажа, игнорируя вертикальную ось (падение/прыжок)
+		local horizontalSpeed = Vector2.new(rootPart.AssemblyLinearVelocity.X, rootPart.AssemblyLinearVelocity.Z).Magnitude
+		local currentState = humanoid:GetState()
+		
+		-- УСЛОВИЕ ДЛЯ ПРЫЖКА:
+		-- 1. Персонаж находится в состоянии бега (не падает, не плавает, не сидит).
+		-- 2. Его горизонтальная скорость очень низкая (он застрял).
+		if currentState == Enum.HumanoidStateType.Running and horizontalSpeed < 0.5 then
 			humanoid.Jump = true
-			canWallJump = false -- Начинаем кулдаун
+			canWallJump = false -- Активируем кулдаун
 			
-			-- Запускаем таймер для сброса кулдауна, не блокируя остальной код
 			task.spawn(function()
 				task.wait(WALL_JUMP_COOLDOWN)
 				canWallJump = true
 			end)
 		end
-	end
-
-	-- Подключаем функцию onBodyTouched ко всем частям тела персонажа
-	for _, part in ipairs(character:GetChildren()) do
-		if part:IsA("BasePart") then
-			part.Touched:Connect(onBodyTouched)
-		end
-	end
+	end)
 end
 
 --==============================================================================
@@ -107,7 +90,7 @@ local function startParodying()
 	if not currentTarget or not currentTarget:IsDescendantOf(Workspace) then return end
 	
 	local targetRootPart = currentTarget:FindFirstChild("HumanoidRootPart")
-	currentTargetHumanoid = currentTarget:FindFirstChildOfClass("Humanoid")
+	local currentTargetHumanoid = currentTarget:FindFirstChildOfClass("Humanoid")
 
 	if not targetRootPart or not currentTargetHumanoid then return end
 
