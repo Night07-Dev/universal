@@ -1,0 +1,20 @@
+-- LocalScript в Roblox Studio
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Функция для прыжка
+local function jump()
+    if humanoid then
+        humanoid.Jump = true
+    end
+end
+
+-- Ожидание 2 секунды перед началом цикла
+wait(3)
+
+-- Запускаем бесконечный цикл с прыжками каждые 2 секунды
+while true do
+    jump()
+    wait(0) -- Задержка в 0 секунды между прыжками
+end
